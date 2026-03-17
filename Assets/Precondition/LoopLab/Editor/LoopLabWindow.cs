@@ -10,6 +10,9 @@ namespace Precondition.LoopLab.Editor
     {
         private const string StateKey = "Precondition.LoopLab.EditorWindow.State.v1";
         private const string ExportFolderPath = "Assets/Precondition/LoopLab/Exports";
+        private static readonly Color PreviewBackgroundColor = new(0.09f, 0.1f, 0.12f);
+        private static readonly Color PreviewSeamColor = new(0.93f, 0.79f, 0.42f, 0.92f);
+        private static readonly Color PreviewOutlineColor = new(0.22f, 0.24f, 0.29f, 0.95f);
 
         private LoopLabRenderSettings settings = LoopLabRenderSettings.Default;
         private LoopLabRenderSettings generatedSettings = LoopLabRenderSettings.Default;
@@ -19,8 +22,15 @@ namespace Precondition.LoopLab.Editor
         private bool hasGenerated;
         private bool hasPendingSettings;
         private bool isPreviewing;
+        private PreviewMode previewMode = PreviewMode.Single;
         private double previewStartTime;
         private string statusMessage = "Ready";
+
+        private enum PreviewMode
+        {
+            Single = 0,
+            Tiled2x2 = 1
+        }
 
         [Serializable]
         private sealed class WindowState
@@ -30,6 +40,7 @@ namespace Precondition.LoopLab.Editor
             public bool HasGenerated;
             public bool HasPendingSettings;
             public bool IsPreviewing;
+            public PreviewMode PreviewMode = PreviewMode.Single;
             public double PreviewStartTime;
         }
 
@@ -110,6 +121,18 @@ namespace Precondition.LoopLab.Editor
                 hasPendingSettings = true;
                 isPreviewing = false;
                 statusMessage = "Settings updated. Generate to refresh loop.";
+            }
+
+            EditorGUI.BeginChangeCheck();
+            previewMode = (PreviewMode)EditorGUILayout.EnumPopup("Preview Mode", previewMode);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Repaint();
+            }
+
+            if (previewMode == PreviewMode.Tiled2x2)
+            {
+                EditorGUILayout.HelpBox("Tiled mode repeats the current frame in a 2x2 layout and highlights the seam boundaries.", MessageType.Info);
             }
 
             GUILayout.Space(8f);
@@ -206,14 +229,19 @@ namespace Precondition.LoopLab.Editor
         private void DrawPreview()
         {
             var previewTexture = RenderCurrentPreviewFrame();
-
             var rect = GUILayoutUtility.GetAspectRect(1f, GUILayout.ExpandWidth(true));
-
-            EditorGUI.DrawRect(rect, new Color(0.09f, 0.1f, 0.12f));
+            EditorGUI.DrawRect(rect, PreviewBackgroundColor);
 
             if (previewTexture != null)
             {
-                GUI.DrawTexture(rect, previewTexture, ScaleMode.ScaleToFit, false);
+                if (previewMode == PreviewMode.Tiled2x2)
+                {
+                    DrawTiledPreview(rect, previewTexture);
+                }
+                else
+                {
+                    DrawPreviewTexture(rect, previewTexture);
+                }
             }
         }
 
@@ -406,12 +434,71 @@ namespace Precondition.LoopLab.Editor
             EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
 
             var rect = GUILayoutUtility.GetAspectRect(1f, GUILayout.ExpandWidth(true));
-            EditorGUI.DrawRect(rect, new Color(0.09f, 0.1f, 0.12f));
+            EditorGUI.DrawRect(rect, PreviewBackgroundColor);
 
             if (texture != null)
             {
                 GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit, false);
             }
+        }
+
+        private static void DrawPreviewTexture(Rect rect, Texture previewTexture)
+        {
+            GUI.DrawTexture(rect, previewTexture, ScaleMode.ScaleToFit, false);
+        }
+
+        private static void DrawTiledPreview(Rect rect, Texture previewTexture)
+        {
+            foreach (var tileRect in GetTiledPreviewTileRects(rect))
+            {
+                DrawPreviewTexture(tileRect, previewTexture);
+            }
+
+            DrawPreviewSeamGuides(rect);
+        }
+
+        private static void DrawPreviewSeamGuides(Rect rect)
+        {
+            foreach (var seamRect in GetPreviewSeamRects(rect))
+            {
+                EditorGUI.DrawRect(seamRect, PreviewSeamColor);
+            }
+
+            var outlineThickness = Mathf.Max(1f, Mathf.Round(rect.width * 0.004f));
+            DrawRectOutline(rect, outlineThickness, PreviewOutlineColor);
+        }
+
+        private static Rect[] GetTiledPreviewTileRects(Rect rect)
+        {
+            var halfWidth = rect.width * 0.5f;
+            var halfHeight = rect.height * 0.5f;
+
+            return new[]
+            {
+                new Rect(rect.xMin, rect.yMin, halfWidth, halfHeight),
+                new Rect(rect.xMin + halfWidth, rect.yMin, halfWidth, halfHeight),
+                new Rect(rect.xMin, rect.yMin + halfHeight, halfWidth, halfHeight),
+                new Rect(rect.xMin + halfWidth, rect.yMin + halfHeight, halfWidth, halfHeight)
+            };
+        }
+
+        private static Rect[] GetPreviewSeamRects(Rect rect)
+        {
+            var seamThickness = Mathf.Max(2f, Mathf.Round(rect.width * 0.01f));
+
+            return new[]
+            {
+                new Rect(rect.center.x - (seamThickness * 0.5f), rect.yMin, seamThickness, rect.height),
+                new Rect(rect.xMin, rect.center.y - (seamThickness * 0.5f), rect.width, seamThickness)
+            };
+        }
+
+        private static void DrawRectOutline(Rect rect, float thickness, Color color)
+        {
+            EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, rect.width, thickness), color);
+            EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMax - thickness, rect.width, thickness), color);
+            EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, thickness, rect.height), color);
+            EditorGUI.DrawRect(new Rect(rect.xMax - thickness, rect.yMin, thickness, rect.height), color);
         }
 
         private void RefreshBoundaryValidation()
@@ -454,6 +541,7 @@ namespace Precondition.LoopLab.Editor
                 hasGenerated = false;
                 hasPendingSettings = false;
                 isPreviewing = false;
+                previewMode = PreviewMode.Single;
                 return;
             }
 
@@ -465,6 +553,7 @@ namespace Precondition.LoopLab.Editor
                 hasGenerated = false;
                 hasPendingSettings = false;
                 isPreviewing = false;
+                previewMode = PreviewMode.Single;
                 return;
             }
 
@@ -472,6 +561,7 @@ namespace Precondition.LoopLab.Editor
             generatedSettings = restoredState.GeneratedSettings.GetValidated();
             hasGenerated = restoredState.HasGenerated;
             hasPendingSettings = restoredState.HasPendingSettings;
+            previewMode = restoredState.PreviewMode;
 
             if (!hasGenerated || hasPendingSettings)
             {
@@ -496,6 +586,7 @@ namespace Precondition.LoopLab.Editor
                 HasGenerated = hasGenerated,
                 HasPendingSettings = hasPendingSettings,
                 IsPreviewing = isPreviewing,
+                PreviewMode = previewMode,
                 PreviewStartTime = previewStartTime
             };
 

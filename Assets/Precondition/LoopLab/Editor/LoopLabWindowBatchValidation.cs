@@ -8,9 +8,13 @@ namespace Precondition.LoopLab.Editor
     public static class LoopLabWindowBatchValidation
     {
         private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+        private const BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.NonPublic;
 
         public static void Run()
         {
+            var stateKey = GetStateKey();
+            var hadOriginalState = EditorPrefs.HasKey(stateKey);
+            var originalState = hadOriginalState ? EditorPrefs.GetString(stateKey) : string.Empty;
             var window = ScriptableObject.CreateInstance<LoopLabWindow>();
 
             try
@@ -55,6 +59,19 @@ namespace Precondition.LoopLab.Editor
                     throw new InvalidOperationException("Preview render returned a null texture.");
                 }
 
+                AssertPreviewMode(window, "Single");
+                SetPreviewMode(window, "Tiled2x2");
+                AssertTiledPreviewGeometry();
+
+                var tiledPreviewTexture = (Texture)Invoke(window, "RenderCurrentPreviewFrame");
+                if (tiledPreviewTexture == null)
+                {
+                    throw new InvalidOperationException("Tiled preview render returned a null texture.");
+                }
+
+                Invoke(window, "SaveState");
+                AssertSavedPreviewMode("Tiled2x2");
+
                 Invoke(window, "ExportGif");
 
                 var exportStatus = (string)GetField(window, "statusMessage");
@@ -68,6 +85,7 @@ namespace Precondition.LoopLab.Editor
             }
             finally
             {
+                RestoreWindowState(stateKey, hadOriginalState, originalState);
                 UnityEngine.Object.DestroyImmediate(window);
             }
         }
@@ -125,6 +143,118 @@ namespace Precondition.LoopLab.Editor
             }
 
             field.SetValue(instance, value);
+        }
+
+        private static void SetPreviewMode(object instance, string previewModeName)
+        {
+            var field = instance.GetType().GetField("previewMode", InstanceFlags);
+            if (field == null)
+            {
+                throw new MissingFieldException(instance.GetType().FullName, "previewMode");
+            }
+
+            field.SetValue(instance, Enum.Parse(field.FieldType, previewModeName));
+        }
+
+        private static void AssertPreviewMode(object instance, string expectedPreviewMode)
+        {
+            var previewMode = GetField(instance, "previewMode");
+            if (!string.Equals(previewMode?.ToString(), expectedPreviewMode, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Expected preview mode {expectedPreviewMode}, got {previewMode}.");
+            }
+        }
+
+        private static void AssertSavedPreviewMode(string expectedPreviewMode)
+        {
+            var restoredWindow = ScriptableObject.CreateInstance<LoopLabWindow>();
+
+            try
+            {
+                Invoke(restoredWindow, "LoadState");
+                AssertPreviewMode(restoredWindow, expectedPreviewMode);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(restoredWindow);
+            }
+        }
+
+        private static void AssertTiledPreviewGeometry()
+        {
+            var previewRect = new Rect(0f, 0f, 200f, 200f);
+            var tileRects = (Rect[])InvokeStatic(typeof(LoopLabWindow), "GetTiledPreviewTileRects", previewRect);
+            if (tileRects.Length != 4)
+            {
+                throw new InvalidOperationException($"Expected 4 tiled preview rects, got {tileRects.Length}.");
+            }
+
+            AssertRect(tileRects[0], 0f, 0f, 100f, 100f, "top-left tile");
+            AssertRect(tileRects[1], 100f, 0f, 100f, 100f, "top-right tile");
+            AssertRect(tileRects[2], 0f, 100f, 100f, 100f, "bottom-left tile");
+            AssertRect(tileRects[3], 100f, 100f, 100f, 100f, "bottom-right tile");
+
+            var seamRects = (Rect[])InvokeStatic(typeof(LoopLabWindow), "GetPreviewSeamRects", previewRect);
+            if (seamRects.Length != 2)
+            {
+                throw new InvalidOperationException($"Expected 2 preview seam rects, got {seamRects.Length}.");
+            }
+
+            if (!Mathf.Approximately(seamRects[0].center.x, previewRect.center.x) || seamRects[0].height != previewRect.height)
+            {
+                throw new InvalidOperationException("Vertical seam guide is not centered on the tiled preview.");
+            }
+
+            if (!Mathf.Approximately(seamRects[1].center.y, previewRect.center.y) || seamRects[1].width != previewRect.width)
+            {
+                throw new InvalidOperationException("Horizontal seam guide is not centered on the tiled preview.");
+            }
+        }
+
+        private static void AssertRect(Rect actual, float x, float y, float width, float height, string label)
+        {
+            if (!Mathf.Approximately(actual.x, x) ||
+                !Mathf.Approximately(actual.y, y) ||
+                !Mathf.Approximately(actual.width, width) ||
+                !Mathf.Approximately(actual.height, height))
+            {
+                throw new InvalidOperationException(
+                    $"{label} expected ({x}, {y}, {width}, {height}) but got ({actual.x}, {actual.y}, {actual.width}, {actual.height}).");
+            }
+        }
+
+        private static string GetStateKey()
+        {
+            var field = typeof(LoopLabWindow).GetField("StateKey", BindingFlags.NonPublic | BindingFlags.Static);
+            if (field == null)
+            {
+                throw new MissingFieldException(typeof(LoopLabWindow).FullName, "StateKey");
+            }
+
+            return (string)field.GetRawConstantValue();
+        }
+
+        private static void RestoreWindowState(string stateKey, bool hadOriginalState, string originalState)
+        {
+            if (hadOriginalState)
+            {
+                EditorPrefs.SetString(stateKey, originalState);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(stateKey);
+            }
+        }
+
+        private static object InvokeStatic(Type type, string methodName, params object[] arguments)
+        {
+            var method = type.GetMethod(methodName, StaticFlags);
+            if (method == null)
+            {
+                throw new MissingMethodException(type.FullName, methodName);
+            }
+
+            return method.Invoke(null, arguments);
         }
 
         private static object Invoke(object instance, string methodName)
