@@ -36,8 +36,8 @@ namespace Precondition.LoopLab
             previewMaterial.SetFloat("_Phase", phase);
             previewMaterial.SetFloat("_Duration", validatedSettings.DurationSeconds);
             previewMaterial.SetFloat("_GridScale", LoopLabPresetCatalog.GetGridScale(validatedSettings.Preset));
-            previewMaterial.SetColor("_BaseColor", LoopLabPresetCatalog.GetBaseColor(validatedSettings.Preset));
-            previewMaterial.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(validatedSettings.Preset));
+            previewMaterial.SetColor("_BaseColor", LoopLabPresetCatalog.GetBaseColor(validatedSettings.Preset, validatedSettings.ContrastMode));
+            previewMaterial.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(validatedSettings.Preset, validatedSettings.ContrastMode));
             previewMaterial.SetVector("_LoopVector", new Vector4(loopVector.x, loopVector.y, 0f, 0f));
 
             RenderToOffscreenTexture();

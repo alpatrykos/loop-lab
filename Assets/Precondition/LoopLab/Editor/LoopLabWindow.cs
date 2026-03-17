@@ -91,6 +91,11 @@ namespace Precondition.LoopLab.Editor
 
             EditorGUI.BeginChangeCheck();
             settings.Preset = (LoopLabPresetKind)EditorGUILayout.EnumPopup("Preset", settings.Preset);
+            if (LoopLabPresetCatalog.SupportsContrastMode(settings.Preset))
+            {
+                settings.ContrastMode = (LoopLabContrastMode)EditorGUILayout.EnumPopup("Palette Contrast", settings.ContrastMode);
+            }
+
             settings.FramesPerSecond = EditorGUILayout.IntSlider("FPS", settings.FramesPerSecond, 12, 60);
             settings.DurationSeconds = EditorGUILayout.Slider("Duration (s)", settings.DurationSeconds, 2f, 4f);
             settings.Resolution = EditorGUILayout.IntPopup(
@@ -182,7 +187,17 @@ namespace Precondition.LoopLab.Editor
 
             GUILayout.Space(12f);
             EditorGUILayout.LabelField("Current Preset", LoopLabPresetCatalog.GetDisplayName(settings.Preset));
+            if (LoopLabPresetCatalog.SupportsContrastMode(settings.Preset))
+            {
+                EditorGUILayout.LabelField("Current Contrast", settings.ContrastMode.ToString());
+            }
+
             EditorGUILayout.LabelField("Generated Preset", LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset));
+            if (LoopLabPresetCatalog.SupportsContrastMode(generatedSettings.Preset))
+            {
+                EditorGUILayout.LabelField("Generated Contrast", generatedSettings.ContrastMode.ToString());
+            }
+
             EditorGUILayout.LabelField("Generated Seed", generatedSettings.Seed.ToString());
             EditorGUILayout.LabelField("Generated Frame Count", generatedSettings.FrameCount.ToString());
             EditorGUILayout.LabelField("Shader", LoopLabPresetCatalog.GetShaderName(generatedSettings.Preset));
