@@ -35,7 +35,7 @@ namespace Precondition.LoopLab
         {
             return preset switch
             {
-                LoopLabPresetKind.Landscape => new Color(0.18f, 0.31f, 0.44f),
+                LoopLabPresetKind.Landscape => new Color(0.17f, 0.28f, 0.41f),
                 LoopLabPresetKind.Fluid => new Color(0.04f, 0.25f, 0.52f),
                 LoopLabPresetKind.Geometric => new Color(0.08f, 0.09f, 0.13f),
                 _ => Color.gray
@@ -46,7 +46,7 @@ namespace Precondition.LoopLab
         {
             return preset switch
             {
-                LoopLabPresetKind.Landscape => new Color(0.92f, 0.73f, 0.43f),
+                LoopLabPresetKind.Landscape => new Color(0.97f, 0.72f, 0.47f),
                 LoopLabPresetKind.Fluid => new Color(0.18f, 0.84f, 0.88f),
                 LoopLabPresetKind.Geometric => new Color(0.95f, 0.44f, 0.18f),
                 _ => Color.white
@@ -57,7 +57,7 @@ namespace Precondition.LoopLab
         {
             return preset switch
             {
-                LoopLabPresetKind.Landscape => 4.5f,
+                LoopLabPresetKind.Landscape => 5.5f,
                 LoopLabPresetKind.Fluid => 5.25f,
                 LoopLabPresetKind.Geometric => 8f,
                 _ => 5f
