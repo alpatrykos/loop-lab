@@ -21,6 +21,7 @@ namespace Precondition.LoopLab
         public Texture RenderAtPhase(LoopLabRenderSettings settings, float phase)
         {
             var validatedSettings = settings.GetValidated();
+            var normalizedPhase = Mathf.Repeat(phase, 1f);
 
             EnsurePreviewTexture(validatedSettings.ClampedResolution);
             EnsurePreviewMaterial(validatedSettings.Preset);
@@ -30,14 +31,14 @@ namespace Precondition.LoopLab
                 return Texture2D.grayTexture;
             }
 
-            var loopVector = LoopPhase.GetLoopVector(phase);
+            var loopVector = LoopPhase.GetLoopVector(normalizedPhase);
 
             previewMaterial.SetFloat("_Seed", validatedSettings.Seed);
-            previewMaterial.SetFloat("_Phase", phase);
+            previewMaterial.SetFloat("_Phase", normalizedPhase);
             previewMaterial.SetFloat("_Duration", validatedSettings.DurationSeconds);
             previewMaterial.SetFloat("_GridScale", LoopLabPresetCatalog.GetGridScale(validatedSettings.Preset));
-            previewMaterial.SetColor("_BaseColor", LoopLabPresetCatalog.GetBaseColor(validatedSettings.Preset));
-            previewMaterial.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(validatedSettings.Preset));
+            previewMaterial.SetColor("_BaseColor", LoopLabPresetCatalog.GetBaseColor(validatedSettings.Preset, validatedSettings.ContrastMode));
+            previewMaterial.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(validatedSettings.Preset, validatedSettings.ContrastMode));
             previewMaterial.SetVector("_LoopVector", new Vector4(loopVector.x, loopVector.y, 0f, 0f));
 
             RenderToOffscreenTexture();

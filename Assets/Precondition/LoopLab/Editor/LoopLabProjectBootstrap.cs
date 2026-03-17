@@ -140,8 +140,8 @@ namespace Precondition.LoopLab.Editor
                     material.shader = shader;
                 }
 
-                material.SetColor("_BaseColor", LoopLabPresetCatalog.GetBaseColor(preset));
-                material.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(preset));
+                material.SetColor("_BaseColor", LoopLabPresetCatalog.GetBaseColor(preset, LoopLabContrastMode.High));
+                material.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(preset, LoopLabContrastMode.High));
                 material.SetFloat("_GridScale", LoopLabPresetCatalog.GetGridScale(preset));
                 EditorUtility.SetDirty(material);
             }

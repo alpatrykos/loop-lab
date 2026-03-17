@@ -3,6 +3,12 @@ using UnityEngine;
 
 namespace Precondition.LoopLab
 {
+    public enum LoopLabContrastMode
+    {
+        High = 0,
+        Low = 1
+    }
+
     [Serializable]
     public struct LoopLabRenderSettings
     {
@@ -12,6 +18,7 @@ namespace Precondition.LoopLab
         public const int MinimumFramesPerSecond = 1;
 
         public LoopLabPresetKind Preset;
+        public LoopLabContrastMode ContrastMode;
         public int FramesPerSecond;
         public float DurationSeconds;
         public int Resolution;
@@ -20,6 +27,7 @@ namespace Precondition.LoopLab
         public static LoopLabRenderSettings Default => new()
         {
             Preset = LoopLabPresetKind.Landscape,
+            ContrastMode = LoopLabContrastMode.High,
             FramesPerSecond = 24,
             DurationSeconds = 3f,
             Resolution = 512,
@@ -41,6 +49,7 @@ namespace Precondition.LoopLab
             return new LoopLabRenderSettings
             {
                 Preset = Preset,
+                ContrastMode = ContrastMode,
                 FramesPerSecond = ValidatedFramesPerSecond,
                 DurationSeconds = ValidatedDurationSeconds,
                 Resolution = ClampedResolution,
