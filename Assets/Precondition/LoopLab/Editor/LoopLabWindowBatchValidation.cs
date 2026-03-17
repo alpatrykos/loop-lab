@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -69,14 +71,57 @@ namespace Precondition.LoopLab.Editor
                     throw new InvalidOperationException("Tiled preview render returned a null texture.");
                 }
 
+                SetField(window, "savedPresetName", "Geometric Baseline");
+                Invoke(window, "SaveCurrentSettingsToPreset");
+                AssertSavedPresetCount(window, 1);
+
+                Invoke(window, "RandomizeSeed");
+
+                var randomizedSettings = (LoopLabRenderSettings)GetField(window, "settings");
+                var randomizedStatus = (string)GetField(window, "statusMessage");
+                var expectedRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(firstGenerated.Seed);
+                if (randomizedSettings.Seed != expectedRandomizedSeed)
+                {
+                    throw new InvalidOperationException(
+                        $"RandomizeSeed expected {expectedRandomizedSeed} but produced {randomizedSettings.Seed}.");
+                }
+
+                if (!randomizedStatus.Contains(randomizedSettings.Seed.ToString(), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"RandomizeSeed status did not expose the new seed: {randomizedStatus}");
+                }
+
+                SetField(window, "savedPresetName", "Geometric Randomized");
+                Invoke(window, "SaveCurrentSettingsToPreset");
+                AssertSavedPresetCount(window, 2);
+
+                SetField(window, "settings", LoopLabRenderSettings.Default);
+                Invoke(window, "LoadSavedPreset", 1);
+
+                var restoredRandomizedSettings = (LoopLabRenderSettings)GetField(window, "settings");
+                if (!restoredRandomizedSettings.Equals(randomizedSettings))
+                {
+                    throw new InvalidOperationException("LoadSavedPreset did not restore the saved randomized settings.");
+                }
+
+                Invoke(window, "GenerateLoop");
+                var randomizedGeneratedSettings = (LoopLabRenderSettings)GetField(window, "generatedSettings");
+                if (!randomizedGeneratedSettings.Equals(randomizedSettings))
+                {
+                    throw new InvalidOperationException("GenerateLoop did not lock the randomized preset settings.");
+                }
+
+                SetField(window, "exportDirectoryPath", "Temp/LoopLabExports");
                 Invoke(window, "SaveState");
-                AssertSavedPreviewMode("Tiled2x2");
+                AssertSavedWorkspaceState("Tiled2x2", "Temp/LoopLabExports", 2, "Geometric Randomized");
 
                 Invoke(window, "ExportGif");
 
                 var exportStatus = (string)GetField(window, "statusMessage");
-                if (!exportStatus.Contains($"seed {firstGenerated.Seed}", StringComparison.Ordinal) ||
-                    !exportStatus.Contains($"{firstGenerated.FrameCount} frames @ {firstGenerated.FramesPerSecond} FPS", StringComparison.Ordinal))
+                var outputDirectory = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "Temp/LoopLabExports"));
+                if (!exportStatus.Contains($"seed {randomizedGeneratedSettings.Seed}", StringComparison.Ordinal) ||
+                    !exportStatus.Contains($"{randomizedGeneratedSettings.FrameCount} frames @ {randomizedGeneratedSettings.FramesPerSecond} FPS", StringComparison.Ordinal) ||
+                    !exportStatus.Contains(outputDirectory, StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException($"Export failure did not preserve normalized settings context: {exportStatus}");
                 }
@@ -134,6 +179,11 @@ namespace Precondition.LoopLab.Editor
             return field.GetValue(instance);
         }
 
+        private static T GetField<T>(object instance, string fieldName)
+        {
+            return (T)GetField(instance, fieldName);
+        }
+
         private static void SetField(object instance, string fieldName, object value)
         {
             var field = instance.GetType().GetField(fieldName, InstanceFlags);
@@ -165,7 +215,11 @@ namespace Precondition.LoopLab.Editor
             }
         }
 
-        private static void AssertSavedPreviewMode(string expectedPreviewMode)
+        private static void AssertSavedWorkspaceState(
+            string expectedPreviewMode,
+            string expectedExportDirectoryPath,
+            int expectedSavedPresetCount,
+            string expectedSavedPresetName)
         {
             var restoredWindow = ScriptableObject.CreateInstance<LoopLabWindow>();
 
@@ -173,10 +227,35 @@ namespace Precondition.LoopLab.Editor
             {
                 Invoke(restoredWindow, "LoadState");
                 AssertPreviewMode(restoredWindow, expectedPreviewMode);
+
+                var restoredExportDirectoryPath = GetField<string>(restoredWindow, "exportDirectoryPath");
+                if (!string.Equals(restoredExportDirectoryPath, expectedExportDirectoryPath, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected export path {expectedExportDirectoryPath}, got {restoredExportDirectoryPath}.");
+                }
+
+                var restoredSavedPresetName = GetField<string>(restoredWindow, "savedPresetName");
+                if (!string.Equals(restoredSavedPresetName, expectedSavedPresetName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected selected preset name {expectedSavedPresetName}, got {restoredSavedPresetName}.");
+                }
+
+                AssertSavedPresetCount(restoredWindow, expectedSavedPresetCount);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(restoredWindow);
+            }
+        }
+
+        private static void AssertSavedPresetCount(object instance, int expectedCount)
+        {
+            var savedPresets = GetField<IList>(instance, "savedPresets");
+            if (savedPresets.Count != expectedCount)
+            {
+                throw new InvalidOperationException($"Expected {expectedCount} saved presets, got {savedPresets.Count}.");
             }
         }
 
@@ -257,7 +336,7 @@ namespace Precondition.LoopLab.Editor
             return method.Invoke(null, arguments);
         }
 
-        private static object Invoke(object instance, string methodName)
+        private static object Invoke(object instance, string methodName, params object[] arguments)
         {
             var method = instance.GetType().GetMethod(methodName, InstanceFlags);
             if (method == null)
@@ -265,7 +344,7 @@ namespace Precondition.LoopLab.Editor
                 throw new MissingMethodException(instance.GetType().FullName, methodName);
             }
 
-            return method.Invoke(instance, null);
+            return method.Invoke(instance, arguments);
         }
     }
 }

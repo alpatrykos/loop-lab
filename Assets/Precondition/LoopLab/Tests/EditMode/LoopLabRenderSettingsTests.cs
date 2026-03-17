@@ -84,5 +84,21 @@ namespace Precondition.LoopLab.Tests
             Assert.That(first.Seed, Is.EqualTo(second.Seed));
             Assert.That(first.FrameCount, Is.EqualTo(second.FrameCount));
         }
+
+        [Test]
+        public void RandomizeSeed_ProducesStableNextSeedInSupportedRange()
+        {
+            const int seed = 1337;
+
+            var firstRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(seed);
+            var secondRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(seed);
+            var nextRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(firstRandomizedSeed);
+
+            Assert.That(firstRandomizedSeed, Is.EqualTo(secondRandomizedSeed));
+            Assert.That(firstRandomizedSeed, Is.Not.EqualTo(LoopLabRenderSettings.ValidateSeed(seed)));
+            Assert.That(firstRandomizedSeed, Is.GreaterThan(0));
+            Assert.That(firstRandomizedSeed, Is.LessThanOrEqualTo(LoopLabRenderSettings.MaxSupportedSeedValue));
+            Assert.That(nextRandomizedSeed, Is.Not.EqualTo(firstRandomizedSeed));
+        }
     }
 }
