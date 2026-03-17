@@ -7,7 +7,11 @@ Regenerate the full set from Unity with either:
 - `Precondition/LoopLab/Export Showcase Assets`
 - `"/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity" -batchmode -projectPath "$PWD" -executeMethod Precondition.LoopLab.Editor.Export.LoopLabShowcaseExporter.RunBatchExport -quit -logFile "$PWD/log/looplab-showcase-export.log"`
 
-Use the repo's standard `-nographics` batchmode command for compile/open validation only. Showcase media generation needs a graphics-backed Unity session; `-nographics` produces flat placeholder renders for these assets.
+For unattended visual validation that also verifies the generated outputs, run:
+
+- `"/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity" -batchmode -projectPath "$PWD" -executeMethod Precondition.LoopLab.Editor.Export.LoopLabShowcaseExporterBatchValidation.Run -quit -logFile "$PWD/log/looplab-visual-validation.log"`
+
+Use the repo's standard `-nographics` batchmode command for compile/open validation only. Showcase media generation and boundary-capture validation now fail fast under the Null graphics device instead of writing flat placeholder renders.
 
 Expected outputs:
 

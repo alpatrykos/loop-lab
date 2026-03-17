@@ -14,7 +14,7 @@ LoopLab is an editor-first Unity tool for generating short, seamless visual loop
 
 ## Screenshots and Examples
 
-These captures were generated from the current project using the built-in boundary-validation path, so they reflect the shipped presets rather than mocked-up marketing art.
+These captures were generated from the current project using the graphics-backed showcase validation/export path, so they reflect the shipped presets rather than mocked-up marketing art.
 
 <p align="center">
   <img src="Docs/README-assets/landscape-default.png" width="31%" alt="Landscape preset still" />
@@ -64,7 +64,8 @@ Important behavior notes:
 - Preview can show live settings before a new generation pass, but exports always use the last generated settings.
 - After changing controls, generate again before exporting. The window will block export when settings are pending.
 - The default export destination is `Assets/Precondition/LoopLab/Exports`, but the window also accepts a custom folder.
-- `Validate All Presets` writes boundary-check snapshots to `log/boundary-validation`.
+- `Validate All Presets` writes boundary-check snapshots to `log/boundary-validation` in graphics-backed sessions.
+- When Unity is running with `-nographics`, LoopLab now rejects placeholder-only visual captures and writes guidance to `log/boundary-validation/VISUAL-VALIDATION-README.md` instead.
 
 ## Portfolio-Facing Usage Notes
 
@@ -167,13 +168,24 @@ Project import / compile check:
   -logFile "$PWD/log/unity-batchmode.log"
 ```
 
-Boundary validation for all presets:
+Boundary validation for all presets in graphics-backed batchmode:
 
 ```bash
 "/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity" \
   -batchmode -projectPath "$PWD" \
   -executeMethod Precondition.LoopLab.Editor.LoopBoundaryValidationBatch.RunAllPresets \
   -quit -logFile "$PWD/log/unity-boundary-validation.log"
+```
+
+If you accidentally run the boundary-validation command with `-nographics`, it now stops before writing placeholder PNGs and records the supported alternative in `log/boundary-validation/VISUAL-VALIDATION-README.md`.
+
+Supported non-interactive visual validation, including showcase asset verification:
+
+```bash
+"/Applications/Unity/Hub/Editor/6000.3.7f1/Unity.app/Contents/MacOS/Unity" \
+  -batchmode -projectPath "$PWD" \
+  -executeMethod Precondition.LoopLab.Editor.Export.LoopLabShowcaseExporterBatchValidation.Run \
+  -quit -logFile "$PWD/log/looplab-visual-validation.log"
 ```
 
 Window workflow validation, including preset save/load, live preview behavior, and GIF export:
