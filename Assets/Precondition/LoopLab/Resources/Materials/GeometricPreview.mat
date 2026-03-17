@@ -26,12 +26,12 @@ Material:
     m_Ints: []
     m_Floats:
     - _Duration: 3
-    - _GridScale: 8
+    - _GridScale: 6.5
     - _Phase: 0
     - _Seed: 0
     m_Colors:
-    - _AccentColor: {r: 0.97, g: 0.76, b: 0.27, a: 1}
-    - _BaseColor: {r: 0.04, g: 0.05, b: 0.08, a: 1}
+    - _AccentColor: {r: 0.95, g: 0.74, b: 0.29, a: 1}
+    - _BaseColor: {r: 0.06, g: 0.07, b: 0.1, a: 1}
     - _LoopVector: {r: 1, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

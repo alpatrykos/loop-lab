@@ -120,61 +120,65 @@ Shader "LoopLab/Landscape"
                 float2 uv = input.uv;
                 float phase = frac(_Phase);
                 float seed = _Seed * 0.071;
-                float detailBias = saturate((_GridScale - 4.0) * 0.2);
-                float terrainBand = 0.5 + 0.5 * cos((uv.y - 0.5) * kFullTurn);
-                float atmosphereBand = 1.0 - terrainBand;
+                float detailBias = saturate((_GridScale - 4.2) * 0.22);
+                float mirroredY = abs(uv.y - 0.5) * 2.0;
+                float atmosphereBand = saturate(mirroredY);
 
                 float warpField = TileFbm(uv, frac(phase * 2.0 + 0.11), seed + 3.0) - 0.5;
                 float ridgeWarp = TileRidgedFbm(uv, frac(phase * 3.0 + 0.29), seed + 19.0) - 0.5;
-                float bandWarp = (warpField * 0.22 + ridgeWarp * 0.16) * (0.75 + detailBias * 0.25);
+                float bandWarp = (warpField * 0.16 + ridgeWarp * 0.11) * (0.72 + detailBias * 0.24);
 
-                float farHeight = 0.42 + TerrainLayer(uv.x, 0.18 + bandWarp * 0.65, frac(phase + 0.13), seed + 31.0, 0.14, 1.28);
-                float midHeight = 0.22 + TerrainLayer(uv.x, 0.44 + bandWarp * 0.95, frac(phase * 2.0 + 0.21), seed + 53.0, 0.22, 1.48);
-                float nearHeight = 0.08 + TerrainLayer(uv.x, 0.72 + bandWarp * 1.15, frac(phase * 3.0 + 0.37), seed + 79.0, 0.3, 1.72);
+                float farHeight = 0.46 + TerrainLayer(uv.x, 0.18 + bandWarp * 0.24, frac(phase + 0.09), seed + 31.0, 0.05, 1.08);
+                float midHeight = 0.31 + TerrainLayer(uv.x, 0.42 + bandWarp * 0.32, frac(phase * 2.0 + 0.17), seed + 53.0, 0.07, 1.18);
+                float nearHeight = 0.18 + TerrainLayer(uv.x, 0.66 + bandWarp * 0.40, frac(phase * 3.0 + 0.29), seed + 79.0, 0.09, 1.30);
 
-                float farMask = smoothstep(farHeight - 0.05, farHeight + 0.015, terrainBand);
-                float midMask = smoothstep(midHeight - 0.055, midHeight + 0.02, terrainBand);
-                float nearMask = smoothstep(nearHeight - 0.06, nearHeight + 0.025, terrainBand);
+                float farMask = 1.0 - smoothstep(farHeight, farHeight + 0.03, mirroredY);
+                float midMask = 1.0 - smoothstep(midHeight, midHeight + 0.026, mirroredY);
+                float nearMask = 1.0 - smoothstep(nearHeight, nearHeight + 0.022, mirroredY);
 
                 float cloudNoise = TileFbm(uv, frac(phase * 2.0 + 0.43), seed + 101.0);
                 float cloudRidge = TileRidgedFbm(uv, frac(phase * 4.0 + 0.59), seed + 127.0);
-                float cloudMask = smoothstep(0.56, 0.82, cloudNoise + cloudRidge * 0.22) * atmosphereBand;
+                float cloudMask = smoothstep(0.58, 0.84, cloudNoise + cloudRidge * 0.18) * atmosphereBand;
 
-                float horizonGlow = smoothstep(0.18, 0.9, terrainBand) * (0.68 + cloudNoise * 0.32);
+                float horizonGlow = saturate(1.0 - abs(mirroredY - farHeight) * 4.4) * (0.68 + cloudNoise * 0.32);
                 float valleyFogNoise = TileFbm(uv, frac(phase * 5.0 + 0.71), seed + 149.0);
-                float valleyFog = smoothstep(0.3, 0.96, atmosphereBand) * saturate(0.22 + valleyFogNoise * 0.78);
+                float valleyFog = smoothstep(0.18, 0.74, mirroredY) * (1.0 - nearMask * 0.78) * saturate(0.26 + valleyFogNoise * 0.74);
 
                 float farTexture = TileFbm(uv, frac(phase + 0.17), seed + 173.0);
                 float midTexture = TileRidgedFbm(uv, frac(phase * 2.0 + 0.33), seed + 197.0);
                 float nearTexture = TileRidgedFbm(uv, frac(phase * 3.0 + 0.49), seed + 223.0);
 
-                float farCrest = 1.0 - smoothstep(0.0, 0.04, abs(terrainBand - farHeight));
-                float midCrest = 1.0 - smoothstep(0.0, 0.04, abs(terrainBand - midHeight));
-                float nearCrest = 1.0 - smoothstep(0.0, 0.04, abs(terrainBand - nearHeight));
+                float farCrest = 1.0 - smoothstep(0.0, 0.035, abs(mirroredY - farHeight));
+                float midCrest = 1.0 - smoothstep(0.0, 0.032, abs(mirroredY - midHeight));
+                float nearCrest = 1.0 - smoothstep(0.0, 0.028, abs(mirroredY - nearHeight));
+                float farBandMask = saturate(farMask - midMask);
+                float midBandMask = saturate(midMask - nearMask * 0.92);
+                float nearBandMask = nearMask;
 
                 float3 baseColor = saturate(_BaseColor.rgb);
                 float3 accentColor = saturate(_AccentColor.rgb);
-                float3 dawnGlow = saturate(lerp(accentColor * 1.08, float3(1.0, 0.83, 0.68), 0.4));
-                float3 skyZenith = saturate(baseColor * 1.4 + float3(0.06, 0.09, 0.16));
-                float3 skyHorizon = saturate(lerp(baseColor * 0.7, dawnGlow, 0.72));
+                float3 dawnGlow = saturate(lerp(accentColor * 1.06, float3(1.0, 0.79, 0.63), 0.46));
+                float3 skyZenith = saturate(baseColor * 1.42 + float3(0.07, 0.10, 0.18));
+                float3 skyHorizon = saturate(lerp(baseColor * 0.48, dawnGlow, 0.78));
 
-                float skyBlend = saturate(atmosphereBand * 0.84 + cloudNoise * 0.16);
+                float skyBlend = saturate(atmosphereBand * 0.88 + cloudNoise * 0.12);
                 float3 color = lerp(skyHorizon, skyZenith, skyBlend);
-                color = lerp(color, dawnGlow, horizonGlow * 0.16);
+                color = lerp(color, dawnGlow, horizonGlow * 0.24);
                 color = lerp(color, float3(1.0, 0.97, 0.93), cloudMask * 0.09);
 
-                float3 farColor = lerp(skyHorizon * 0.85, baseColor * 0.8 + dawnGlow * 0.14, saturate(farTexture * 0.75 + 0.15));
-                float3 midColor = lerp(baseColor * 0.46, baseColor * 0.9 + dawnGlow * 0.18, saturate(midTexture * 0.7 + 0.18));
-                float3 nearColor = lerp(baseColor * 0.22, baseColor * 0.58 + accentColor * 0.1, saturate(nearTexture * 0.62 + 0.22));
+                float3 farColor = lerp(skyHorizon * 0.88, baseColor * 0.68 + dawnGlow * 0.18, saturate(farTexture * 0.68 + 0.18));
+                float3 midColor = lerp(baseColor * 0.42, baseColor * 0.8 + dawnGlow * 0.22, saturate(midTexture * 0.66 + 0.18));
+                float3 nearColor = lerp(baseColor * 0.28, baseColor * 0.52 + accentColor * 0.18, saturate(nearTexture * 0.58 + 0.28));
 
-                farColor = lerp(farColor, dawnGlow, farCrest * 0.22);
-                midColor = lerp(midColor, dawnGlow, midCrest * 0.18);
-                nearColor = lerp(nearColor, accentColor, nearCrest * 0.09);
+                farColor = lerp(farColor, dawnGlow, farCrest * 0.34);
+                midColor = lerp(midColor, dawnGlow, midCrest * 0.28);
+                nearColor = lerp(nearColor, accentColor, nearCrest * 0.18);
 
-                color = lerp(color, farColor, farMask);
-                color = lerp(color, midColor, midMask);
-                color = lerp(color, nearColor, nearMask);
-                color = lerp(color, skyHorizon, valleyFog * (0.18 + (1.0 - nearMask) * 0.08));
+                color = lerp(color, farColor, farBandMask);
+                color = lerp(color, midColor, midBandMask);
+                color = lerp(color, nearColor, nearBandMask * 0.82);
+                color = lerp(color, accentColor * 0.62 + dawnGlow * 0.38, nearCrest * nearBandMask * 0.18);
+                color = lerp(color, skyHorizon, valleyFog * (0.26 + (1.0 - nearBandMask) * 0.12));
 
                 float grain = (TileFbm(uv, frac(phase * 6.0 + 0.83), seed + 251.0) - 0.5) * 0.03;
                 float vignette = saturate(1.0 - dot(uv - 0.5, uv - 0.5) * 0.7);
