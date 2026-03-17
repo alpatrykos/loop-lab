@@ -183,6 +183,7 @@ namespace Precondition.LoopLab.Editor
             GUILayout.Space(12f);
             EditorGUILayout.LabelField("Current Preset", LoopLabPresetCatalog.GetDisplayName(settings.Preset));
             EditorGUILayout.LabelField("Generated Preset", LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset));
+            EditorGUILayout.LabelField("Generated Seed", generatedSettings.Seed.ToString());
             EditorGUILayout.LabelField("Generated Frame Count", generatedSettings.FrameCount.ToString());
             EditorGUILayout.LabelField("Shader", LoopLabPresetCatalog.GetShaderName(generatedSettings.Preset));
         }
@@ -204,18 +205,20 @@ namespace Precondition.LoopLab.Editor
         private void GenerateLoop()
         {
             renderer ??= new LoopRenderer();
-            generatedSettings = settings;
+            generatedSettings = settings.GetValidated();
             hasGenerated = true;
             hasPendingSettings = false;
             isPreviewing = false;
             previewStartTime = EditorApplication.timeSinceStartup;
             renderer.Render(generatedSettings, 0);
             RefreshBoundaryValidation();
+            var generationSummary =
+                $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS using seed {generatedSettings.Seed}.";
             statusMessage = boundaryValidation == null
-                ? $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS."
+                ? generationSummary
                 : boundaryValidation.MatchesVisually
-                    ? $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS. Boundary check passed."
-                    : $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS. Boundary mismatch detected.";
+                    ? generationSummary + " Boundary check passed."
+                    : generationSummary + " Boundary mismatch detected.";
             Repaint();
         }
 
@@ -278,13 +281,13 @@ namespace Precondition.LoopLab.Editor
             return true;
         }
 
-        private void ExportWith(Action<string> exporter, string formatLabel)
+        private void ExportWith(Action<LoopLabRenderSettings, string> exporter, string formatLabel)
         {
             try
             {
                 var outputDirectory = GetAbsoluteExportDirectory();
                 Directory.CreateDirectory(outputDirectory);
-                exporter(outputDirectory);
+                exporter(generatedSettings, outputDirectory);
                 statusMessage = $"{formatLabel} export requested to {outputDirectory}.";
             }
             catch (Exception exception)
@@ -322,7 +325,7 @@ namespace Precondition.LoopLab.Editor
                 return renderer.Render(generatedSettings, 0);
             }
 
-            return renderer.Render(settings, 0);
+            return renderer.Render(settings.GetValidated(), 0);
         }
 
         private void DrawBoundaryValidation()
@@ -451,7 +454,7 @@ namespace Precondition.LoopLab.Editor
             }
 
             settings = restoredState.Settings;
-            generatedSettings = restoredState.GeneratedSettings;
+            generatedSettings = restoredState.GeneratedSettings.GetValidated();
             hasGenerated = restoredState.HasGenerated;
             hasPendingSettings = restoredState.HasPendingSettings;
 
