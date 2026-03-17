@@ -14,6 +14,7 @@ namespace Precondition.LoopLab.Editor
         private LoopLabRenderSettings settings = LoopLabRenderSettings.Default;
         private LoopLabRenderSettings generatedSettings = LoopLabRenderSettings.Default;
         private LoopRenderer renderer;
+        private LoopBoundaryValidationResult boundaryValidation;
         private Vector2 scrollPosition;
         private bool hasGenerated;
         private bool hasPendingSettings;
@@ -35,16 +36,37 @@ namespace Precondition.LoopLab.Editor
         [MenuItem("Precondition/LoopLab", priority = 100)]
         public static void ShowWindow()
         {
+            GetOrCreateWindow();
+        }
+
+        [MenuItem("Precondition/LoopLab/Generate Current Loop", priority = 101)]
+        private static void GenerateCurrentLoopFromMenu()
+        {
+            var window = GetOrCreateWindow();
+            window.GenerateLoop();
+        }
+
+        [MenuItem("Precondition/LoopLab/Toggle Preview", priority = 102)]
+        private static void TogglePreviewFromMenu()
+        {
+            var window = GetOrCreateWindow();
+            window.TogglePreview();
+        }
+
+        private static LoopLabWindow GetOrCreateWindow()
+        {
             var window = GetWindow<LoopLabWindow>("LoopLab");
             window.minSize = new Vector2(440f, 560f);
             window.Focus();
             window.Repaint();
+            return window;
         }
 
         private void OnEnable()
         {
             LoadState();
             renderer ??= new LoopRenderer();
+            RefreshBoundaryValidation();
             EditorApplication.update += HandleEditorUpdate;
         }
 
@@ -52,6 +74,8 @@ namespace Precondition.LoopLab.Editor
         {
             EditorApplication.update -= HandleEditorUpdate;
             SaveState();
+            boundaryValidation?.Dispose();
+            boundaryValidation = null;
             renderer?.Dispose();
             renderer = null;
         }
@@ -128,6 +152,11 @@ namespace Precondition.LoopLab.Editor
                 {
                     LoopLabProjectBootstrap.RevealExportsFolder();
                 }
+
+                if (GUILayout.Button("Validate All Presets"))
+                {
+                    RunBoundaryValidationBatch();
+                }
             }
 
             GUILayout.Space(8f);
@@ -145,7 +174,11 @@ namespace Precondition.LoopLab.Editor
                 EditorGUILayout.HelpBox("Settings have changed since last generation.", MessageType.Warning);
             }
 
+            DrawBoundaryValidationSummary();
+
             DrawPreview();
+
+            DrawBoundaryValidation();
 
             GUILayout.Space(12f);
             EditorGUILayout.LabelField("Current Preset", LoopLabPresetCatalog.GetDisplayName(settings.Preset));
@@ -178,7 +211,14 @@ namespace Precondition.LoopLab.Editor
             isPreviewing = false;
             previewStartTime = EditorApplication.timeSinceStartup;
             renderer.Render(generatedSettings, 0);
-            statusMessage = $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS using seed {generatedSettings.Seed}.";
+            RefreshBoundaryValidation();
+            var generationSummary =
+                $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS using seed {generatedSettings.Seed}.";
+            statusMessage = boundaryValidation == null
+                ? generationSummary
+                : boundaryValidation.MatchesVisually
+                    ? generationSummary + " Boundary check passed."
+                    : generationSummary + " Boundary mismatch detected.";
             Repaint();
         }
 
@@ -286,6 +326,107 @@ namespace Precondition.LoopLab.Editor
             }
 
             return renderer.Render(settings.GetValidated(), 0);
+        }
+
+        private void DrawBoundaryValidation()
+        {
+            GUILayout.Space(12f);
+            EditorGUILayout.LabelField("Loop Boundary QA", EditorStyles.boldLabel);
+
+            if (!hasGenerated)
+            {
+                EditorGUILayout.HelpBox("Generate a loop to compare frame 0 with the restart frame.", MessageType.Info);
+                return;
+            }
+
+            if (boundaryValidation == null)
+            {
+                EditorGUILayout.HelpBox("Boundary validation is unavailable for the current generated loop.", MessageType.Warning);
+                return;
+            }
+
+            EditorGUILayout.HelpBox(
+                boundaryValidation.Summary + " Frame N is sampled at normalized phase 1.0 for the restart sanity check.",
+                boundaryValidation.MatchesVisually ? MessageType.Info : MessageType.Warning);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                DrawValidationTexture("Frame 0", boundaryValidation.FirstFrame);
+                DrawValidationTexture($"Frame {boundaryValidation.ComparedFrameIndex}", boundaryValidation.BoundaryFrame);
+                DrawValidationTexture("Difference", boundaryValidation.DifferenceTexture);
+            }
+        }
+
+        private void DrawBoundaryValidationSummary()
+        {
+            if (!hasGenerated)
+            {
+                return;
+            }
+
+            GUILayout.Space(8f);
+            EditorGUILayout.LabelField("Boundary Status", EditorStyles.miniBoldLabel);
+
+            if (boundaryValidation == null)
+            {
+                EditorGUILayout.HelpBox("Boundary validation is unavailable for the current generated loop.", MessageType.Warning);
+                return;
+            }
+
+            EditorGUILayout.HelpBox(
+                boundaryValidation.Summary,
+                boundaryValidation.MatchesVisually ? MessageType.Info : MessageType.Warning);
+
+            if (hasPendingSettings)
+            {
+                EditorGUILayout.HelpBox(
+                    "Boundary QA still reflects the last generated loop. Generate again to re-check the current settings.",
+                    MessageType.Warning);
+            }
+        }
+
+        private static void DrawValidationTexture(string label, Texture texture)
+        {
+            using var column = new EditorGUILayout.VerticalScope(GUILayout.ExpandWidth(true));
+            EditorGUILayout.LabelField(label, EditorStyles.miniBoldLabel);
+
+            var rect = GUILayoutUtility.GetAspectRect(1f, GUILayout.ExpandWidth(true));
+            EditorGUI.DrawRect(rect, new Color(0.09f, 0.1f, 0.12f));
+
+            if (texture != null)
+            {
+                GUI.DrawTexture(rect, texture, ScaleMode.ScaleToFit, false);
+            }
+        }
+
+        private void RefreshBoundaryValidation()
+        {
+            boundaryValidation?.Dispose();
+            boundaryValidation = null;
+
+            if (!hasGenerated)
+            {
+                return;
+            }
+
+            renderer ??= new LoopRenderer();
+            boundaryValidation = LoopBoundaryValidator.Capture(renderer, generatedSettings);
+        }
+
+        private void RunBoundaryValidationBatch()
+        {
+            try
+            {
+                var outputDirectory = LoopBoundaryValidationBatch.RunAllPresetsToDefaultOutput();
+                statusMessage = $"Boundary validation passed for all presets. Snapshots saved to {outputDirectory}.";
+            }
+            catch (Exception exception)
+            {
+                statusMessage = "Boundary validation failed. Check the Console for details.";
+                Debug.LogException(exception);
+            }
+
+            Repaint();
         }
 
         private void LoadState()
