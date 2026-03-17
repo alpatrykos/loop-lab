@@ -1,0 +1,21 @@
+{
+  "name": "Precondition.LoopLab.Tests.EditMode",
+  "rootNamespace": "Precondition.LoopLab.Tests",
+  "references": [
+    "Precondition.LoopLab.Runtime"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "noEngineReferences": false
+}
