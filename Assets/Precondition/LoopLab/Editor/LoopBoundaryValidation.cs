@@ -210,19 +210,30 @@ namespace Precondition.LoopLab.Editor
 
             foreach (LoopLabPresetKind preset in Enum.GetValues(typeof(LoopLabPresetKind)))
             {
-                var settings = LoopLabRenderSettings.Default;
-                settings.Preset = preset;
-
-                using var result = LoopBoundaryValidator.Capture(renderer, settings);
-                var filePrefix = preset.ToString().ToLowerInvariant();
-                result.WriteImages(outputDirectory, filePrefix);
-
-                Debug.Log(
-                    $"[LoopBoundaryValidation] {preset}: compared frame 0 vs frame {result.ComparedFrameIndex}, avg delta {(result.AverageDelta * 100f):0.00}%, max delta {(result.MaxDelta * 100f):0.00}%.");
-
-                if (!result.MatchesVisually)
+                foreach (var contrastMode in GetContrastModes(preset))
                 {
-                    failures.Add($"{preset} (avg {(result.AverageDelta * 100f):0.00}%, max {(result.MaxDelta * 100f):0.00}%)");
+                    var settings = LoopLabRenderSettings.Default;
+                    settings.Preset = preset;
+                    settings.ContrastMode = contrastMode;
+
+                    using var result = LoopBoundaryValidator.Capture(renderer, settings);
+                    var filePrefix = preset.ToString().ToLowerInvariant();
+                    var variantLabel = preset.ToString();
+                    if (LoopLabPresetCatalog.SupportsContrastMode(preset))
+                    {
+                        filePrefix += "-" + contrastMode.ToString().ToLowerInvariant();
+                        variantLabel += $" ({contrastMode})";
+                    }
+
+                    result.WriteImages(outputDirectory, filePrefix);
+
+                    Debug.Log(
+                        $"[LoopBoundaryValidation] {variantLabel}: compared frame 0 vs frame {result.ComparedFrameIndex}, avg delta {(result.AverageDelta * 100f):0.00}%, max delta {(result.MaxDelta * 100f):0.00}%.");
+
+                    if (!result.MatchesVisually)
+                    {
+                        failures.Add($"{variantLabel} (avg {(result.AverageDelta * 100f):0.00}%, max {(result.MaxDelta * 100f):0.00}%)");
+                    }
                 }
             }
 
@@ -232,6 +243,16 @@ namespace Precondition.LoopLab.Editor
             }
 
             Debug.Log("[LoopBoundaryValidation] All presets match at the loop restart boundary.");
+        }
+
+        private static LoopLabContrastMode[] GetContrastModes(LoopLabPresetKind preset)
+        {
+            if (!LoopLabPresetCatalog.SupportsContrastMode(preset))
+            {
+                return new[] { LoopLabContrastMode.High };
+            }
+
+            return new[] { LoopLabContrastMode.High, LoopLabContrastMode.Low };
         }
     }
 }

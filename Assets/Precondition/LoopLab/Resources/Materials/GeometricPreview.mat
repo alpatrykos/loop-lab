@@ -30,8 +30,8 @@ Material:
     - _Phase: 0
     - _Seed: 0
     m_Colors:
-    - _AccentColor: {r: 0.95, g: 0.44, b: 0.18, a: 1}
-    - _BaseColor: {r: 0.08, g: 0.09, b: 0.13, a: 1}
+    - _AccentColor: {r: 0.97, g: 0.76, b: 0.27, a: 1}
+    - _BaseColor: {r: 0.04, g: 0.05, b: 0.08, a: 1}
     - _LoopVector: {r: 1, g: 0, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
