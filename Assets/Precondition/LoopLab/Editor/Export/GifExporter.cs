@@ -5,7 +5,7 @@ namespace Precondition.LoopLab.Editor.Export
 {
     public static class GifExporter
     {
-        public static void Export(LoopLabRenderSettings settings, string outputDirectory)
+        public static string Export(LoopLabRenderSettings settings, string outputDirectory)
         {
             var request = new LoopLabExportRequest("GIF", ".gif", settings, outputDirectory);
             if (!LoopLabFfmpegLocator.TryResolveExecutable(out _, out var resolutionSource))
@@ -15,7 +15,7 @@ namespace Precondition.LoopLab.Editor.Export
                 throw new InvalidOperationException(missingFfmpegMessage);
             }
 
-            LoopLabExportSession.Run(request, workspace =>
+            return LoopLabExportSession.Run(request, workspace =>
             {
                 LoopLabExportFrameWriter.WritePngFrames(request.Settings, workspace);
 

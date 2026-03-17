@@ -412,7 +412,7 @@ namespace Precondition.LoopLab.Editor
             return true;
         }
 
-        private void ExportWith(Action<LoopLabRenderSettings, string> exporter, string formatLabel)
+        private void ExportWith(Func<LoopLabRenderSettings, string, string> exporter, string formatLabel)
         {
             if (!TryGetAbsoluteExportDirectory(out var outputDirectory, out var errorMessage))
             {
@@ -430,8 +430,8 @@ namespace Precondition.LoopLab.Editor
             try
             {
                 Directory.CreateDirectory(outputDirectory);
-                exporter(generatedSettings, outputDirectory);
-                statusMessage = $"{formatLabel} export completed for {exportSummary} -> {outputDirectory}.";
+                var outputPath = exporter(generatedSettings, outputDirectory);
+                statusMessage = $"{formatLabel} export completed for {exportSummary} -> {outputPath}.";
             }
             catch (Exception exception)
             {
