@@ -228,6 +228,11 @@ namespace Precondition.LoopLab.Editor
                     LoopLabProjectBootstrap.RunInteractive();
                 }
 
+                if (GUILayout.Button("Export Showcase Assets"))
+                {
+                    ExportShowcaseAssets();
+                }
+
                 if (GUILayout.Button("Open Export Location"))
                 {
                     RevealExportDirectory();
@@ -671,6 +676,23 @@ namespace Precondition.LoopLab.Editor
             catch (Exception exception)
             {
                 statusMessage = "Boundary validation failed. Check the Console for details.";
+                Debug.LogException(exception);
+            }
+
+            PersistState();
+            Repaint();
+        }
+
+        private void ExportShowcaseAssets()
+        {
+            try
+            {
+                var outputDirectory = LoopLabShowcaseExporter.ExportAll();
+                statusMessage = $"Showcase export wrote GIFs, thumbnails, and a comparison sheet to {outputDirectory}.";
+            }
+            catch (Exception exception)
+            {
+                statusMessage = "Showcase export failed. Check the Console for details.";
                 Debug.LogException(exception);
             }
 
