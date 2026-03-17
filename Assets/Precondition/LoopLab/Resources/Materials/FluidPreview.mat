@@ -26,7 +26,7 @@ Material:
     m_Ints: []
     m_Floats:
     - _Duration: 3
-    - _GridScale: 6
+    - _GridScale: 5.25
     - _Phase: 0
     - _Seed: 0
     m_Colors:
