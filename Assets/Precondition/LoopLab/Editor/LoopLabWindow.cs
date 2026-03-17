@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -23,13 +24,34 @@ namespace Precondition.LoopLab.Editor
         private bool hasPendingSettings;
         private bool isPreviewing;
         private PreviewMode previewMode = PreviewMode.Single;
+        private float previewElapsedSeconds;
         private double previewStartTime;
         private string statusMessage = "Ready";
+        private readonly List<SavedPresetState> savedPresets = new();
+        private int selectedSavedPresetIndex = -1;
+        private string savedPresetName = string.Empty;
+        private string exportDirectoryPath = string.Empty;
 
         private enum PreviewMode
         {
             Single = 0,
             Tiled2x2 = 1
+        }
+
+        [Serializable]
+        private sealed class SavedPresetState
+        {
+            public string Name = string.Empty;
+            public LoopLabRenderSettings Settings = LoopLabRenderSettings.Default;
+
+            public SavedPresetState Clone()
+            {
+                return new SavedPresetState
+                {
+                    Name = Name,
+                    Settings = Settings
+                };
+            }
         }
 
         [Serializable]
@@ -41,7 +63,12 @@ namespace Precondition.LoopLab.Editor
             public bool HasPendingSettings;
             public bool IsPreviewing;
             public PreviewMode PreviewMode = PreviewMode.Single;
+            public float PreviewElapsedSeconds;
             public double PreviewStartTime;
+            public SavedPresetState[] SavedPresets = Array.Empty<SavedPresetState>();
+            public int SelectedSavedPresetIndex = -1;
+            public string SavedPresetName = string.Empty;
+            public string ExportDirectoryPath = string.Empty;
         }
 
         [MenuItem("Precondition/LoopLab", priority = 100)]
@@ -78,6 +105,7 @@ namespace Precondition.LoopLab.Editor
             LoadState();
             renderer ??= new LoopRenderer();
             RefreshBoundaryValidation();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
             EditorApplication.update += HandleEditorUpdate;
         }
 
@@ -114,19 +142,28 @@ namespace Precondition.LoopLab.Editor
                 settings.Resolution,
                 new[] { "256", "512", "1024" },
                 new[] { 256, 512, 1024 });
-            settings.Seed = EditorGUILayout.IntField("Seed", settings.Seed);
+            var randomizeSeedRequested = false;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                settings.Seed = EditorGUILayout.IntField("Seed", settings.Seed);
+                randomizeSeedRequested = GUILayout.Button("Randomize", GUILayout.Width(96f));
+            }
 
             if (EditorGUI.EndChangeCheck())
             {
-                hasPendingSettings = true;
-                isPreviewing = false;
-                statusMessage = "Settings updated. Generate to refresh loop.";
+                HandleSettingsChanged("Settings updated.");
+            }
+
+            if (randomizeSeedRequested)
+            {
+                RandomizeSeed();
             }
 
             EditorGUI.BeginChangeCheck();
             previewMode = (PreviewMode)EditorGUILayout.EnumPopup("Preview Mode", previewMode);
             if (EditorGUI.EndChangeCheck())
             {
+                PersistState();
                 Repaint();
             }
 
@@ -136,6 +173,10 @@ namespace Precondition.LoopLab.Editor
             }
 
             GUILayout.Space(8f);
+            DrawSavedPresetControls();
+            GUILayout.Space(8f);
+            DrawExportDestinationControls();
+            GUILayout.Space(8f);
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -144,12 +185,9 @@ namespace Precondition.LoopLab.Editor
                     GenerateLoop();
                 }
 
-                using (new EditorGUI.DisabledGroupScope(!hasGenerated || hasPendingSettings))
+                if (GUILayout.Button(isPreviewing ? "Pause" : "Play"))
                 {
-                    if (GUILayout.Button(isPreviewing ? "Pause Preview" : "Preview"))
-                    {
-                        TogglePreview();
-                    }
+                    TogglePreview();
                 }
 
                 using (new EditorGUI.DisabledGroupScope(!hasGenerated || hasPendingSettings))
@@ -176,9 +214,9 @@ namespace Precondition.LoopLab.Editor
                     LoopLabProjectBootstrap.RunInteractive();
                 }
 
-                if (GUILayout.Button("Open Exports Folder"))
+                if (GUILayout.Button("Open Export Location"))
                 {
-                    LoopLabProjectBootstrap.RevealExportsFolder();
+                    RevealExportDirectory();
                 }
 
                 if (GUILayout.Button("Validate All Presets"))
@@ -194,15 +232,20 @@ namespace Precondition.LoopLab.Editor
 
             if (!hasGenerated)
             {
-                EditorGUILayout.HelpBox("A test frame is rendered for the current settings. Generate to lock loop state for exports.", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    "Preview renders current settings live. Generate to lock a loop for exports and boundary QA.",
+                    MessageType.Info);
             }
 
-            if (hasPendingSettings)
+            if (hasGenerated && hasPendingSettings)
             {
-                EditorGUILayout.HelpBox("Settings have changed since last generation.", MessageType.Warning);
+                EditorGUILayout.HelpBox(
+                    "Preview reflects live settings. Generate again to refresh the saved loop used for exports and boundary QA.",
+                    MessageType.Warning);
             }
 
             DrawBoundaryValidationSummary();
+            DrawPreviewControls();
 
             DrawPreview();
 
@@ -215,15 +258,19 @@ namespace Precondition.LoopLab.Editor
                 EditorGUILayout.LabelField("Current Contrast", settings.ContrastMode.ToString());
             }
 
-            EditorGUILayout.LabelField("Generated Preset", LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset));
-            if (LoopLabPresetCatalog.SupportsContrastMode(generatedSettings.Preset))
+            EditorGUILayout.LabelField(
+                "Generated Preset",
+                hasGenerated ? LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset) : "Not generated yet");
+            if (hasGenerated && LoopLabPresetCatalog.SupportsContrastMode(generatedSettings.Preset))
             {
                 EditorGUILayout.LabelField("Generated Contrast", generatedSettings.ContrastMode.ToString());
             }
 
-            EditorGUILayout.LabelField("Generated Seed", generatedSettings.Seed.ToString());
-            EditorGUILayout.LabelField("Generated Frame Count", generatedSettings.FrameCount.ToString());
-            EditorGUILayout.LabelField("Shader", LoopLabPresetCatalog.GetShaderName(generatedSettings.Preset));
+            EditorGUILayout.LabelField("Generated Seed", hasGenerated ? generatedSettings.Seed.ToString() : "Not generated yet");
+            EditorGUILayout.LabelField(
+                "Generated Frame Count",
+                hasGenerated ? generatedSettings.FrameCount.ToString() : "Not generated yet");
+            EditorGUILayout.LabelField("Shader", LoopLabPresetCatalog.GetShaderName(GetPreviewSettings().Preset));
         }
 
         private void DrawPreview()
@@ -245,45 +292,84 @@ namespace Precondition.LoopLab.Editor
             }
         }
 
+        private void DrawPreviewControls()
+        {
+            var previewSettings = GetPreviewSettings();
+            var previewElapsed = GetPreviewElapsedForSettings(previewSettings);
+            var previewFrame = LoopLabRenderSettings.GetPreviewFrameIndex(
+                previewElapsed,
+                previewSettings.DurationSeconds,
+                previewSettings.FrameCount);
+            var previewSource = hasGenerated && !hasPendingSettings ? "Generated loop" : "Live settings";
+
+            GUILayout.Space(12f);
+            EditorGUILayout.LabelField("Preview Controls", EditorStyles.boldLabel);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Source", previewSource);
+                EditorGUILayout.LabelField("Frame", $"{previewFrame + 1} / {previewSettings.FrameCount}", GUILayout.Width(112f));
+            }
+
+            EditorGUI.BeginChangeCheck();
+            var scrubbedTime = EditorGUILayout.Slider(
+                "Timeline",
+                previewElapsed,
+                0f,
+                GetPreviewScrubMaximum(previewSettings));
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                ScrubPreview(scrubbedTime);
+            }
+
+            EditorGUILayout.LabelField(
+                "Preview Time",
+                $"{previewElapsed:0.00}s / {previewSettings.ValidatedDurationSeconds:0.00}s");
+        }
+
         private void GenerateLoop()
         {
             renderer ??= new LoopRenderer();
+            previewElapsedSeconds = GetPreviewElapsedForSettings(settings.GetValidated());
             generatedSettings = settings.GetValidated();
+            settings = generatedSettings;
             hasGenerated = true;
-            hasPendingSettings = false;
-            isPreviewing = false;
-            previewStartTime = EditorApplication.timeSinceStartup;
+            UpdatePendingState();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+            statusMessage = $"Generating {LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset)} with seed {generatedSettings.Seed}...";
+            Repaint();
             renderer.Render(generatedSettings, 0);
             RefreshBoundaryValidation();
             var generationSummary =
-                $"Generated {generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS using seed {generatedSettings.Seed}.";
+                $"Generated {LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset)} with {generatedSettings.FrameCount} frames @ " +
+                $"{generatedSettings.FramesPerSecond} FPS using seed {generatedSettings.Seed}.";
             statusMessage = boundaryValidation == null
                 ? generationSummary
                 : boundaryValidation.MatchesVisually
                     ? generationSummary + " Boundary check passed."
                     : generationSummary + " Boundary mismatch detected.";
+            PersistState();
             Repaint();
         }
 
         private void TogglePreview()
         {
-            if (!hasGenerated || hasPendingSettings)
-            {
-                statusMessage = "Generate before previewing.";
-                return;
-            }
-
-            isPreviewing = !isPreviewing;
             if (isPreviewing)
             {
-                previewStartTime = EditorApplication.timeSinceStartup;
-                statusMessage = "Preview running.";
+                previewElapsedSeconds = GetCurrentPreviewElapsedSeconds();
+                isPreviewing = false;
+                statusMessage = "Preview paused.";
             }
             else
             {
-                statusMessage = "Preview paused.";
+                previewElapsedSeconds = GetCurrentPreviewElapsedSeconds();
+                previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+                isPreviewing = true;
+                statusMessage = "Preview running.";
             }
 
+            PersistState();
             Repaint();
         }
 
@@ -312,12 +398,14 @@ namespace Precondition.LoopLab.Editor
             if (hasPendingSettings)
             {
                 statusMessage = "Generate before exporting after changing settings.";
+                PersistState();
                 return false;
             }
 
             if (!hasGenerated)
             {
                 statusMessage = $"{formatLabel} export unavailable. Generate first.";
+                PersistState();
                 return false;
             }
 
@@ -326,28 +414,65 @@ namespace Precondition.LoopLab.Editor
 
         private void ExportWith(Func<LoopLabRenderSettings, string, string> exporter, string formatLabel)
         {
+            if (!TryGetAbsoluteExportDirectory(out var outputDirectory, out var errorMessage))
+            {
+                statusMessage = $"{formatLabel} export failed. {errorMessage}";
+                PersistState();
+                return;
+            }
+
+            var exportSummary =
+                $"{LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset)} seed {generatedSettings.Seed} " +
+                $"({generatedSettings.FrameCount} frames @ {generatedSettings.FramesPerSecond} FPS)";
+            statusMessage = $"{formatLabel} export started for {exportSummary} -> {outputDirectory}.";
+            Repaint();
+
             try
             {
-                var outputDirectory = GetAbsoluteExportDirectory();
                 Directory.CreateDirectory(outputDirectory);
                 var outputPath = exporter(generatedSettings, outputDirectory);
-                statusMessage = $"{formatLabel} exported to {outputPath}.";
+                statusMessage = $"{formatLabel} export completed for {exportSummary} -> {outputPath}.";
             }
             catch (Exception exception)
             {
-                statusMessage = $"{formatLabel} export failed: {exception.Message}";
+                statusMessage = $"{formatLabel} export failed for {exportSummary} -> {outputDirectory}: {exception.Message}";
             }
+
+            PersistState();
         }
 
-        private static string GetAbsoluteExportDirectory()
+        private bool TryGetAbsoluteExportDirectory(out string absoluteDirectory, out string errorMessage)
         {
+            absoluteDirectory = string.Empty;
+            errorMessage = string.Empty;
+
             var projectRoot = Directory.GetParent(Application.dataPath);
             if (projectRoot == null)
             {
-                throw new InvalidOperationException("Unable to resolve project root path for exports.");
+                errorMessage = "Unable to resolve project root path for exports.";
+                return false;
             }
 
-            return Path.GetFullPath(Path.Combine(projectRoot.FullName, ExportFolderPath));
+            try
+            {
+                var configuredDirectory = GetConfiguredExportDirectoryInput();
+                absoluteDirectory = Path.IsPathRooted(configuredDirectory)
+                    ? Path.GetFullPath(configuredDirectory)
+                    : Path.GetFullPath(Path.Combine(projectRoot.FullName, configuredDirectory));
+                return true;
+            }
+            catch (Exception exception)
+            {
+                errorMessage = $"Invalid export destination: {exception.Message}";
+                return false;
+            }
+        }
+
+        private string GetConfiguredExportDirectoryInput()
+        {
+            return string.IsNullOrWhiteSpace(exportDirectoryPath)
+                ? ExportFolderPath
+                : exportDirectoryPath.Trim();
         }
 
         private Texture RenderCurrentPreviewFrame()
@@ -357,18 +482,9 @@ namespace Precondition.LoopLab.Editor
                 return null;
             }
 
-            if (isPreviewing && hasGenerated && !hasPendingSettings)
-            {
-                var elapsed = (float)(EditorApplication.timeSinceStartup - previewStartTime);
-                return renderer.RenderPreview(generatedSettings, elapsed);
-            }
-
-            if (hasGenerated && !hasPendingSettings)
-            {
-                return renderer.Render(generatedSettings, 0);
-            }
-
-            return renderer.Render(settings.GetValidated(), 0);
+            var previewSettings = GetPreviewSettings();
+            var previewElapsed = GetPreviewElapsedForSettings(previewSettings);
+            return renderer.RenderPreview(previewSettings, previewElapsed);
         }
 
         private void DrawBoundaryValidation()
@@ -528,6 +644,7 @@ namespace Precondition.LoopLab.Editor
                 Debug.LogException(exception);
             }
 
+            PersistState();
             Repaint();
         }
 
@@ -536,45 +653,63 @@ namespace Precondition.LoopLab.Editor
             var serializedState = EditorPrefs.GetString(StateKey);
             if (string.IsNullOrEmpty(serializedState))
             {
-                settings = LoopLabRenderSettings.Default;
-                generatedSettings = settings;
-                hasGenerated = false;
-                hasPendingSettings = false;
-                isPreviewing = false;
-                previewMode = PreviewMode.Single;
+                ResetWindowState();
                 return;
             }
 
             var restoredState = JsonUtility.FromJson<WindowState>(serializedState);
             if (restoredState == null)
             {
-                settings = LoopLabRenderSettings.Default;
-                generatedSettings = settings;
-                hasGenerated = false;
-                hasPendingSettings = false;
-                isPreviewing = false;
-                previewMode = PreviewMode.Single;
+                ResetWindowState();
                 return;
             }
 
             settings = restoredState.Settings;
             generatedSettings = restoredState.GeneratedSettings.GetValidated();
             hasGenerated = restoredState.HasGenerated;
-            hasPendingSettings = restoredState.HasPendingSettings;
             previewMode = restoredState.PreviewMode;
-
-            if (!hasGenerated || hasPendingSettings)
+            savedPresets.Clear();
+            if (restoredState.SavedPresets != null)
             {
-                isPreviewing = false;
-            }
-            else
-            {
-                isPreviewing = restoredState.IsPreviewing;
+                foreach (var preset in restoredState.SavedPresets)
+                {
+                    if (preset == null || string.IsNullOrWhiteSpace(preset.Name))
+                    {
+                        continue;
+                    }
+
+                    savedPresets.Add(new SavedPresetState
+                    {
+                        Name = preset.Name.Trim(),
+                        Settings = preset.Settings.GetValidated()
+                    });
+                }
             }
 
-            previewStartTime = isPreviewing && restoredState.PreviewStartTime > EditorApplication.timeSinceStartup
-                ? EditorApplication.timeSinceStartup
-                : restoredState.PreviewStartTime;
+            selectedSavedPresetIndex = savedPresets.Count == 0
+                ? -1
+                : Mathf.Clamp(restoredState.SelectedSavedPresetIndex, 0, savedPresets.Count - 1);
+            savedPresetName = string.IsNullOrWhiteSpace(restoredState.SavedPresetName)
+                ? selectedSavedPresetIndex >= 0
+                    ? savedPresets[selectedSavedPresetIndex].Name
+                    : string.Empty
+                : restoredState.SavedPresetName.Trim();
+            exportDirectoryPath = restoredState.ExportDirectoryPath ?? string.Empty;
+            UpdatePendingState();
+            isPreviewing = restoredState.IsPreviewing;
+            previewElapsedSeconds = restoredState.PreviewElapsedSeconds;
+            if (previewElapsedSeconds <= 0f && isPreviewing && restoredState.PreviewStartTime > 0d)
+            {
+                previewElapsedSeconds = LoopLabRenderSettings.NormalizePreviewElapsedSeconds(
+                    (float)(EditorApplication.timeSinceStartup - restoredState.PreviewStartTime),
+                    GetPreviewSettings().DurationSeconds);
+            }
+
+            previewElapsedSeconds = Mathf.Clamp(
+                previewElapsedSeconds,
+                0f,
+                GetPreviewScrubMaximum(GetPreviewSettings()));
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
         }
 
         private void SaveState()
@@ -587,7 +722,12 @@ namespace Precondition.LoopLab.Editor
                 HasPendingSettings = hasPendingSettings,
                 IsPreviewing = isPreviewing,
                 PreviewMode = previewMode,
-                PreviewStartTime = previewStartTime
+                PreviewElapsedSeconds = GetCurrentPreviewElapsedSeconds(),
+                PreviewStartTime = previewStartTime,
+                SavedPresets = GetSavedPresetStateSnapshot(),
+                SelectedSavedPresetIndex = selectedSavedPresetIndex,
+                SavedPresetName = savedPresetName,
+                ExportDirectoryPath = exportDirectoryPath
             };
 
             EditorPrefs.SetString(StateKey, JsonUtility.ToJson(state));
@@ -602,8 +742,392 @@ namespace Precondition.LoopLab.Editor
 
             if (isPreviewing)
             {
+                previewElapsedSeconds = GetCurrentPreviewElapsedSeconds();
                 Repaint();
             }
+        }
+
+        private void DrawSavedPresetControls()
+        {
+            EditorGUILayout.LabelField("Saved Presets", EditorStyles.boldLabel);
+
+            EditorGUI.BeginChangeCheck();
+            savedPresetName = EditorGUILayout.TextField("Name", savedPresetName);
+            if (EditorGUI.EndChangeCheck())
+            {
+                PersistState();
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.FlexibleSpace();
+
+                if (GUILayout.Button("Save Current", GUILayout.Width(110f)))
+                {
+                    SaveCurrentSettingsToPreset();
+                }
+            }
+
+            if (savedPresets.Count == 0)
+            {
+                EditorGUILayout.HelpBox("Save the current settings to reload them quickly across sessions.", MessageType.Info);
+                return;
+            }
+
+            var selectedIndex = GetClampedSelectedSavedPresetIndex();
+            var savedPresetOptions = GetSavedPresetOptions();
+            EditorGUI.BeginChangeCheck();
+            selectedIndex = EditorGUILayout.Popup("Manage Preset", selectedIndex, savedPresetOptions);
+            if (EditorGUI.EndChangeCheck())
+            {
+                SelectSavedPreset(selectedIndex, updateNameField: true);
+                PersistState();
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledGroupScope(GetClampedSelectedSavedPresetIndex() < 0))
+                {
+                    if (GUILayout.Button("Load Selected"))
+                    {
+                        LoadSavedPreset(GetClampedSelectedSavedPresetIndex());
+                    }
+
+                    if (GUILayout.Button("Delete Selected"))
+                    {
+                        DeleteSavedPreset(GetClampedSelectedSavedPresetIndex());
+                    }
+                }
+            }
+
+            EditorGUILayout.LabelField("Quick Load", EditorStyles.miniBoldLabel);
+            var quickLoadSelection = GUILayout.SelectionGrid(selectedIndex, savedPresetOptions, Mathf.Min(2, savedPresetOptions.Length));
+            if (quickLoadSelection != selectedIndex)
+            {
+                LoadSavedPreset(quickLoadSelection);
+            }
+        }
+
+        private void DrawExportDestinationControls()
+        {
+            EditorGUILayout.LabelField("Export Destination", EditorStyles.boldLabel);
+
+            EditorGUI.BeginChangeCheck();
+            exportDirectoryPath = EditorGUILayout.TextField("Folder", GetConfiguredExportDirectoryInput());
+            if (EditorGUI.EndChangeCheck())
+            {
+                exportDirectoryPath = exportDirectoryPath.Trim();
+                statusMessage = $"Export destination updated to {GetConfiguredExportDirectoryInput()}.";
+                PersistState();
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Browse..."))
+                {
+                    ChooseExportDirectory();
+                }
+
+                if (GUILayout.Button("Reset"))
+                {
+                    ResetExportDirectory();
+                }
+            }
+
+            if (TryGetAbsoluteExportDirectory(out var absoluteDirectory, out var errorMessage))
+            {
+                EditorGUILayout.LabelField("Resolved Path", absoluteDirectory);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(errorMessage, MessageType.Warning);
+            }
+        }
+
+        private void HandleSettingsChanged(string changeSummary)
+        {
+            previewElapsedSeconds = GetPreviewElapsedForSettings(settings.GetValidated());
+            UpdatePendingState();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+            statusMessage = BuildSettingsChangedStatus(changeSummary);
+            PersistState();
+            Repaint();
+        }
+
+        private string BuildSettingsChangedStatus(string changeSummary)
+        {
+            if (hasGenerated && hasPendingSettings)
+            {
+                return changeSummary + " Preview reflects live settings. Generate to refresh exports.";
+            }
+
+            if (hasGenerated)
+            {
+                return changeSummary + " Preview matches the generated loop.";
+            }
+
+            return changeSummary + " Preview updated.";
+        }
+
+        private LoopLabRenderSettings GetPreviewSettings()
+        {
+            return hasGenerated && !hasPendingSettings
+                ? generatedSettings
+                : settings.GetValidated();
+        }
+
+        private float GetPreviewElapsedForSettings(LoopLabRenderSettings previewSettings)
+        {
+            if (isPreviewing)
+            {
+                return LoopLabRenderSettings.NormalizePreviewElapsedSeconds(
+                    (float)(EditorApplication.timeSinceStartup - previewStartTime),
+                    previewSettings.DurationSeconds);
+            }
+
+            return Mathf.Clamp(
+                previewElapsedSeconds,
+                0f,
+                GetPreviewScrubMaximum(previewSettings));
+        }
+
+        private static float GetPreviewScrubMaximum(LoopLabRenderSettings previewSettings)
+        {
+            if (previewSettings.FrameCount <= 1)
+            {
+                return 0f;
+            }
+
+            return previewSettings.ValidatedDurationSeconds - (previewSettings.ValidatedDurationSeconds / previewSettings.FrameCount);
+        }
+
+        private float GetCurrentPreviewElapsedSeconds()
+        {
+            return GetPreviewElapsedForSettings(GetPreviewSettings());
+        }
+
+        private void RandomizeSeed()
+        {
+            settings.Seed = LoopLabRenderSettings.RandomizeSeed(settings.Seed);
+            HandleSettingsChanged($"Seed randomized to {settings.Seed}.");
+        }
+
+        private void ScrubPreview(float previewSeconds)
+        {
+            previewElapsedSeconds = Mathf.Clamp(previewSeconds, 0f, GetPreviewScrubMaximum(GetPreviewSettings()));
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+            PersistState();
+            Repaint();
+        }
+
+        private void SaveCurrentSettingsToPreset()
+        {
+            var validatedSettings = settings.GetValidated();
+            var normalizedName = GetNormalizedSavedPresetName();
+            var existingIndex = FindSavedPresetIndexByName(normalizedName);
+            var savedPreset = new SavedPresetState
+            {
+                Name = normalizedName,
+                Settings = validatedSettings
+            };
+
+            if (existingIndex >= 0)
+            {
+                savedPresets[existingIndex] = savedPreset;
+                selectedSavedPresetIndex = existingIndex;
+                statusMessage = $"Updated preset '{normalizedName}'.";
+            }
+            else
+            {
+                savedPresets.Add(savedPreset);
+                selectedSavedPresetIndex = savedPresets.Count - 1;
+                statusMessage = $"Saved preset '{normalizedName}'.";
+            }
+
+            savedPresetName = normalizedName;
+            PersistState();
+        }
+
+        private void LoadSavedPreset(int presetIndex)
+        {
+            if (!IsValidSavedPresetIndex(presetIndex))
+            {
+                statusMessage = "Select a saved preset to load.";
+                PersistState();
+                return;
+            }
+
+            var savedPreset = savedPresets[presetIndex];
+            settings = savedPreset.Settings.GetValidated();
+            SelectSavedPreset(presetIndex, updateNameField: true);
+            previewElapsedSeconds = GetPreviewElapsedForSettings(settings.GetValidated());
+            UpdatePendingState();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+            statusMessage = BuildSettingsChangedStatus($"Loaded preset '{savedPreset.Name}'.");
+            PersistState();
+            Repaint();
+        }
+
+        private void DeleteSavedPreset(int presetIndex)
+        {
+            if (!IsValidSavedPresetIndex(presetIndex))
+            {
+                statusMessage = "Select a saved preset to delete.";
+                PersistState();
+                return;
+            }
+
+            var deletedPresetName = savedPresets[presetIndex].Name;
+            savedPresets.RemoveAt(presetIndex);
+
+            if (savedPresets.Count == 0)
+            {
+                selectedSavedPresetIndex = -1;
+                savedPresetName = string.Empty;
+            }
+            else
+            {
+                SelectSavedPreset(Mathf.Clamp(presetIndex, 0, savedPresets.Count - 1), updateNameField: true);
+            }
+
+            statusMessage = $"Deleted preset '{deletedPresetName}'.";
+            PersistState();
+        }
+
+        private void SelectSavedPreset(int presetIndex, bool updateNameField)
+        {
+            selectedSavedPresetIndex = IsValidSavedPresetIndex(presetIndex) ? presetIndex : -1;
+            if (updateNameField)
+            {
+                savedPresetName = selectedSavedPresetIndex >= 0
+                    ? savedPresets[selectedSavedPresetIndex].Name
+                    : string.Empty;
+            }
+        }
+
+        private string[] GetSavedPresetOptions()
+        {
+            var options = new string[savedPresets.Count];
+            for (var index = 0; index < savedPresets.Count; index++)
+            {
+                options[index] = savedPresets[index].Name;
+            }
+
+            return options;
+        }
+
+        private SavedPresetState[] GetSavedPresetStateSnapshot()
+        {
+            var snapshot = new SavedPresetState[savedPresets.Count];
+            for (var index = 0; index < savedPresets.Count; index++)
+            {
+                snapshot[index] = savedPresets[index].Clone();
+            }
+
+            return snapshot;
+        }
+
+        private int GetClampedSelectedSavedPresetIndex()
+        {
+            if (savedPresets.Count == 0)
+            {
+                return -1;
+            }
+
+            return Mathf.Clamp(selectedSavedPresetIndex, 0, savedPresets.Count - 1);
+        }
+
+        private bool IsValidSavedPresetIndex(int presetIndex)
+        {
+            return presetIndex >= 0 && presetIndex < savedPresets.Count;
+        }
+
+        private int FindSavedPresetIndexByName(string presetName)
+        {
+            for (var index = 0; index < savedPresets.Count; index++)
+            {
+                if (string.Equals(savedPresets[index].Name, presetName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private string GetNormalizedSavedPresetName()
+        {
+            if (!string.IsNullOrWhiteSpace(savedPresetName))
+            {
+                return savedPresetName.Trim();
+            }
+
+            var validatedSettings = settings.GetValidated();
+            return $"{validatedSettings.Preset} {validatedSettings.Seed}";
+        }
+
+        private void ChooseExportDirectory()
+        {
+            var startingDirectory = TryGetAbsoluteExportDirectory(out var absoluteDirectory, out _)
+                ? absoluteDirectory
+                : Directory.GetCurrentDirectory();
+            var selectedDirectory = EditorUtility.OpenFolderPanel("Select LoopLab export folder", startingDirectory, string.Empty);
+            if (string.IsNullOrEmpty(selectedDirectory))
+            {
+                return;
+            }
+
+            exportDirectoryPath = selectedDirectory;
+            statusMessage = $"Export destination updated to {exportDirectoryPath}.";
+            PersistState();
+        }
+
+        private void ResetExportDirectory()
+        {
+            exportDirectoryPath = string.Empty;
+            statusMessage = $"Export destination reset to {ExportFolderPath}.";
+            PersistState();
+        }
+
+        private void RevealExportDirectory()
+        {
+            if (!TryGetAbsoluteExportDirectory(out var outputDirectory, out var errorMessage))
+            {
+                statusMessage = errorMessage;
+                PersistState();
+                return;
+            }
+
+            Directory.CreateDirectory(outputDirectory);
+            EditorUtility.RevealInFinder(outputDirectory);
+            statusMessage = $"Opened export location {outputDirectory}.";
+            PersistState();
+        }
+
+        private void PersistState()
+        {
+            SaveState();
+        }
+
+        private void ResetWindowState()
+        {
+            settings = LoopLabRenderSettings.Default;
+            generatedSettings = settings;
+            hasGenerated = false;
+            hasPendingSettings = false;
+            isPreviewing = false;
+            previewMode = PreviewMode.Single;
+            previewElapsedSeconds = 0f;
+            previewStartTime = 0d;
+            savedPresets.Clear();
+            selectedSavedPresetIndex = -1;
+            savedPresetName = string.Empty;
+            exportDirectoryPath = string.Empty;
+        }
+
+        private void UpdatePendingState()
+        {
+            hasPendingSettings = hasGenerated && !settings.GetValidated().Equals(generatedSettings);
         }
     }
 }

@@ -1,5 +1,8 @@
 using System;
+using System.Collections;
+using System.IO;
 using System.Reflection;
+using Precondition.LoopLab.Editor.Export;
 using UnityEditor;
 using UnityEngine;
 
@@ -69,17 +72,122 @@ namespace Precondition.LoopLab.Editor
                     throw new InvalidOperationException("Tiled preview render returned a null texture.");
                 }
 
-                Invoke(window, "SaveState");
-                AssertSavedPreviewMode("Tiled2x2");
+                SetField(window, "savedPresetName", "Geometric Baseline");
+                Invoke(window, "SaveCurrentSettingsToPreset");
+                AssertSavedPresetCount(window, 1);
 
-                Invoke(window, "ExportGif");
+                var livePreviewSettings = firstGenerated;
+                livePreviewSettings.DurationSeconds = 4f;
+                livePreviewSettings.Resolution = 256;
+                livePreviewSettings.Seed = firstGenerated.Seed + 17;
+
+                SetField(window, "settings", livePreviewSettings);
+                Invoke(window, "HandleSettingsChanged", "Settings updated.");
+
+                if (!GetField<bool>(window, "isPreviewing"))
+                {
+                    throw new InvalidOperationException("Preview unexpectedly stopped after settings changed.");
+                }
+
+                if (!GetField<bool>(window, "hasPendingSettings"))
+                {
+                    throw new InvalidOperationException("Live preview settings were not marked pending after editing.");
+                }
+
+                var livePreviewStatus = GetField<string>(window, "statusMessage");
+                if (!livePreviewStatus.Contains("Preview reflects live settings. Generate to refresh exports.", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Unexpected live preview status: {livePreviewStatus}");
+                }
+
+                var livePreviewTexture = (Texture)Invoke(window, "RenderCurrentPreviewFrame");
+                if (livePreviewTexture is not RenderTexture livePreviewRenderTexture ||
+                    livePreviewRenderTexture.width != livePreviewSettings.ClampedResolution)
+                {
+                    throw new InvalidOperationException("Live preview did not refresh to the updated resolution.");
+                }
+
+                Invoke(window, "ScrubPreview", 1.5f);
+
+                var previewElapsed = GetField<float>(window, "previewElapsedSeconds");
+                if (!Mathf.Approximately(previewElapsed, 1.5f))
+                {
+                    throw new InvalidOperationException($"Expected scrubbed preview time 1.5s, got {previewElapsed:0.000}.");
+                }
+
+                var randomizedBefore = GetField<LoopLabRenderSettings>(window, "settings");
+                Invoke(window, "RandomizeSeed");
+                var randomizedAfter = GetField<LoopLabRenderSettings>(window, "settings");
+                var randomizedStatus = (string)GetField(window, "statusMessage");
+                var expectedRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(randomizedBefore.Seed);
+
+                if (randomizedAfter.Seed != expectedRandomizedSeed)
+                {
+                    throw new InvalidOperationException(
+                        $"RandomizeSeed expected {expectedRandomizedSeed} but produced {randomizedAfter.Seed}.");
+                }
+
+                if (!randomizedStatus.Contains(randomizedAfter.Seed.ToString(), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"RandomizeSeed status did not expose the new seed: {randomizedStatus}");
+                }
+
+                if (randomizedAfter.Seed <= 0 || randomizedAfter.Seed > LoopLabRenderSettings.MaxSupportedSeedValue)
+                {
+                    throw new InvalidOperationException($"Randomized seed was out of range: {randomizedAfter.Seed}.");
+                }
+
+                SetField(window, "savedPresetName", "Geometric Randomized");
+                Invoke(window, "SaveCurrentSettingsToPreset");
+                AssertSavedPresetCount(window, 2);
+
+                SetField(window, "settings", LoopLabRenderSettings.Default);
+                Invoke(window, "LoadSavedPreset", 1);
+
+                var restoredRandomizedSettings = (LoopLabRenderSettings)GetField(window, "settings");
+                if (!restoredRandomizedSettings.Equals(randomizedAfter))
+                {
+                    throw new InvalidOperationException("LoadSavedPreset did not restore the saved randomized settings.");
+                }
+
+                Invoke(window, "GenerateLoop");
+
+                var randomizedGeneratedSettings = (LoopLabRenderSettings)GetField(window, "generatedSettings");
+                if (!randomizedGeneratedSettings.Equals(randomizedAfter))
+                {
+                    throw new InvalidOperationException("GenerateLoop did not lock the randomized preset settings.");
+                }
+
+                SetField(window, "exportDirectoryPath", "Temp/LoopLabExports");
+                Invoke(window, "SaveState");
+                AssertSavedWorkspaceState("Tiled2x2", "Temp/LoopLabExports", 2, "Geometric Randomized");
+
+                var outputDirectory = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "Temp/LoopLabExports"));
+                var originalFfmpegOverride = Environment.GetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable);
+
+                try
+                {
+                    Environment.SetEnvironmentVariable(
+                        LoopLabFfmpegLocator.OverridePathEnvironmentVariable,
+                        Path.Combine(outputDirectory, "missing-ffmpeg"));
+                    Invoke(window, "ExportGif");
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable, originalFfmpegOverride);
+                }
 
                 var exportStatus = (string)GetField(window, "statusMessage");
-                if (!exportStatus.Contains($"seed {firstGenerated.Seed}", StringComparison.Ordinal) ||
-                    !exportStatus.Contains($"{firstGenerated.FrameCount} frames @ {firstGenerated.FramesPerSecond} FPS", StringComparison.Ordinal))
+                if (!exportStatus.Contains("ffmpeg", StringComparison.OrdinalIgnoreCase) ||
+                    !exportStatus.Contains($"seed {randomizedGeneratedSettings.Seed}", StringComparison.Ordinal) ||
+                    !exportStatus.Contains($"{randomizedGeneratedSettings.FrameCount} frames @ {randomizedGeneratedSettings.FramesPerSecond} FPS", StringComparison.Ordinal) ||
+                    !exportStatus.Contains(outputDirectory, StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException($"Export failure did not preserve normalized settings context: {exportStatus}");
+                    throw new InvalidOperationException($"Export failure did not preserve ffmpeg fallback context: {exportStatus}");
                 }
+
+                AssertNoTemporaryWorkspaces(outputDirectory);
+                AssertExportLifecycleCleanup(outputDirectory);
 
                 Debug.Log("LoopLabWindow batch validation passed.");
             }
@@ -134,6 +242,11 @@ namespace Precondition.LoopLab.Editor
             return field.GetValue(instance);
         }
 
+        private static T GetField<T>(object instance, string fieldName)
+        {
+            return (T)GetField(instance, fieldName);
+        }
+
         private static void SetField(object instance, string fieldName, object value)
         {
             var field = instance.GetType().GetField(fieldName, InstanceFlags);
@@ -165,7 +278,11 @@ namespace Precondition.LoopLab.Editor
             }
         }
 
-        private static void AssertSavedPreviewMode(string expectedPreviewMode)
+        private static void AssertSavedWorkspaceState(
+            string expectedPreviewMode,
+            string expectedExportDirectoryPath,
+            int expectedSavedPresetCount,
+            string expectedSavedPresetName)
         {
             var restoredWindow = ScriptableObject.CreateInstance<LoopLabWindow>();
 
@@ -173,10 +290,35 @@ namespace Precondition.LoopLab.Editor
             {
                 Invoke(restoredWindow, "LoadState");
                 AssertPreviewMode(restoredWindow, expectedPreviewMode);
+
+                var restoredExportDirectoryPath = GetField<string>(restoredWindow, "exportDirectoryPath");
+                if (!string.Equals(restoredExportDirectoryPath, expectedExportDirectoryPath, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected export path {expectedExportDirectoryPath}, got {restoredExportDirectoryPath}.");
+                }
+
+                var restoredSavedPresetName = GetField<string>(restoredWindow, "savedPresetName");
+                if (!string.Equals(restoredSavedPresetName, expectedSavedPresetName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected selected preset name {expectedSavedPresetName}, got {restoredSavedPresetName}.");
+                }
+
+                AssertSavedPresetCount(restoredWindow, expectedSavedPresetCount);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(restoredWindow);
+            }
+        }
+
+        private static void AssertSavedPresetCount(object instance, int expectedCount)
+        {
+            var savedPresets = GetField<IList>(instance, "savedPresets");
+            if (savedPresets.Count != expectedCount)
+            {
+                throw new InvalidOperationException($"Expected {expectedCount} saved presets, got {savedPresets.Count}.");
             }
         }
 
@@ -234,6 +376,142 @@ namespace Precondition.LoopLab.Editor
             return (string)field.GetRawConstantValue();
         }
 
+        private static string GetAbsoluteExportDirectory()
+        {
+            return (string)InvokeStatic(typeof(LoopLabWindow), "GetAbsoluteExportDirectory");
+        }
+
+        private static void AssertExportLifecycleCleanup(string exportDirectory)
+        {
+            var validationDirectory = Path.Combine(exportDirectory, "BatchValidation");
+            if (Directory.Exists(validationDirectory))
+            {
+                Directory.Delete(validationDirectory, true);
+            }
+
+            Directory.CreateDirectory(validationDirectory);
+
+            try
+            {
+                AssertSuccessfulExportPublishesOutput(validationDirectory);
+                AssertFailedExportCleansTemporaryFiles(validationDirectory);
+                AssertCanceledExportCleansTemporaryFiles(validationDirectory);
+                AssertStaleWorkspaceCleanup(validationDirectory);
+                AssertNoTemporaryWorkspaces(validationDirectory);
+            }
+            finally
+            {
+                if (Directory.Exists(validationDirectory))
+                {
+                    Directory.Delete(validationDirectory, true);
+                }
+            }
+        }
+
+        private static void AssertSuccessfulExportPublishesOutput(string validationDirectory)
+        {
+            var request = new LoopLabExportRequest("Validation GIF", ".gif", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = LoopLabExportSession.Run(request, workspace =>
+            {
+                File.WriteAllText(workspace.GetFramePath(0), "frame");
+                File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 1, 2, 3, 4 });
+            });
+
+            if (!File.Exists(finalOutputPath))
+            {
+                throw new InvalidOperationException($"Expected a published output at {finalOutputPath}.");
+            }
+
+            File.Delete(finalOutputPath);
+            AssertNoTemporaryWorkspaces(validationDirectory);
+        }
+
+        private static void AssertFailedExportCleansTemporaryFiles(string validationDirectory)
+        {
+            var request = new LoopLabExportRequest("Validation MP4", ".mp4", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = Path.Combine(validationDirectory, request.OutputFileName);
+
+            try
+            {
+                LoopLabExportSession.Run(request, workspace =>
+                {
+                    File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 9, 8, 7 });
+                    throw new InvalidOperationException("Simulated export failure.");
+                });
+                throw new InvalidOperationException("Expected simulated export failure.");
+            }
+            catch (InvalidOperationException exception) when (exception.Message == "Simulated export failure.")
+            {
+            }
+
+            if (File.Exists(finalOutputPath))
+            {
+                throw new InvalidOperationException($"Failure path left a partial output at {finalOutputPath}.");
+            }
+
+            AssertNoTemporaryWorkspaces(validationDirectory);
+        }
+
+        private static void AssertCanceledExportCleansTemporaryFiles(string validationDirectory)
+        {
+            var request = new LoopLabExportRequest("Validation Cancel", ".gif", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = Path.Combine(validationDirectory, request.OutputFileName);
+
+            try
+            {
+                LoopLabExportSession.Run(request, workspace =>
+                {
+                    File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 6, 5, 4 });
+                    throw new OperationCanceledException("Simulated export cancel.");
+                });
+                throw new InvalidOperationException("Expected simulated export cancel.");
+            }
+            catch (OperationCanceledException exception) when (exception.Message == "Simulated export cancel.")
+            {
+            }
+
+            if (File.Exists(finalOutputPath))
+            {
+                throw new InvalidOperationException($"Cancel path left a partial output at {finalOutputPath}.");
+            }
+
+            AssertNoTemporaryWorkspaces(validationDirectory);
+        }
+
+        private static void AssertStaleWorkspaceCleanup(string validationDirectory)
+        {
+            var staleDirectory = Path.Combine(
+                validationDirectory,
+                LoopLabExportSession.TemporaryDirectoryPrefix + "stale-validation-workspace");
+            Directory.CreateDirectory(staleDirectory);
+            File.WriteAllText(Path.Combine(staleDirectory, "stale.txt"), "stale");
+            Directory.SetLastWriteTimeUtc(staleDirectory, DateTime.UtcNow - TimeSpan.FromDays(2));
+
+            var request = new LoopLabExportRequest("Validation Cleanup", ".gif", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = LoopLabExportSession.Run(request, workspace =>
+            {
+                File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 0x1 });
+            });
+
+            if (Directory.Exists(staleDirectory))
+            {
+                throw new InvalidOperationException($"Expected stale workspace cleanup for {staleDirectory}.");
+            }
+
+            if (File.Exists(finalOutputPath))
+            {
+                File.Delete(finalOutputPath);
+            }
+        }
+
+        private static void AssertNoTemporaryWorkspaces(string outputDirectory)
+        {
+            if (LoopLabExportSession.HasTemporaryWorkspaces(outputDirectory))
+            {
+                throw new InvalidOperationException($"Temporary workspaces were not cleaned from {outputDirectory}.");
+            }
+        }
+
         private static void RestoreWindowState(string stateKey, bool hadOriginalState, string originalState)
         {
             if (hadOriginalState)
@@ -257,15 +535,16 @@ namespace Precondition.LoopLab.Editor
             return method.Invoke(null, arguments);
         }
 
-        private static object Invoke(object instance, string methodName)
+        private static object Invoke(object instance, string methodName, params object[] args)
         {
-            var method = instance.GetType().GetMethod(methodName, InstanceFlags);
+            var argumentTypes = Array.ConvertAll(args, argument => argument.GetType());
+            var method = instance.GetType().GetMethod(methodName, InstanceFlags, null, argumentTypes, null);
             if (method == null)
             {
                 throw new MissingMethodException(instance.GetType().FullName, methodName);
             }
 
-            return method.Invoke(instance, null);
+            return method.Invoke(instance, args);
         }
     }
 }
