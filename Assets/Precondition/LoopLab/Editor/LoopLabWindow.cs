@@ -140,7 +140,7 @@ namespace Precondition.LoopLab.Editor
                 EditorGUILayout.HelpBox("Generate first to create a loop state for preview and export.", MessageType.Info);
             }
 
-            if (hasPendingSettings && !hasGenerated)
+            if (hasPendingSettings)
             {
                 EditorGUILayout.HelpBox("Settings have changed since last generation.", MessageType.Warning);
             }
@@ -313,8 +313,19 @@ namespace Precondition.LoopLab.Editor
             generatedSettings = restoredState.GeneratedSettings;
             hasGenerated = restoredState.HasGenerated;
             hasPendingSettings = restoredState.HasPendingSettings;
-            isPreviewing = restoredState.IsPreviewing;
-            previewStartTime = restoredState.PreviewStartTime;
+
+            if (!hasGenerated || hasPendingSettings)
+            {
+                isPreviewing = false;
+            }
+            else
+            {
+                isPreviewing = restoredState.IsPreviewing;
+            }
+
+            previewStartTime = isPreviewing && restoredState.PreviewStartTime > EditorApplication.timeSinceStartup
+                ? EditorApplication.timeSinceStartup
+                : restoredState.PreviewStartTime;
         }
 
         private void SaveState()
