@@ -75,20 +75,65 @@ namespace Precondition.LoopLab.Editor
                 Invoke(window, "SaveCurrentSettingsToPreset");
                 AssertSavedPresetCount(window, 1);
 
-                Invoke(window, "RandomizeSeed");
+                var livePreviewSettings = firstGenerated;
+                livePreviewSettings.DurationSeconds = 4f;
+                livePreviewSettings.Resolution = 256;
+                livePreviewSettings.Seed = firstGenerated.Seed + 17;
 
-                var randomizedSettings = (LoopLabRenderSettings)GetField(window, "settings");
-                var randomizedStatus = (string)GetField(window, "statusMessage");
-                var expectedRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(firstGenerated.Seed);
-                if (randomizedSettings.Seed != expectedRandomizedSeed)
+                SetField(window, "settings", livePreviewSettings);
+                Invoke(window, "HandleSettingsChanged", "Settings updated.");
+
+                if (!GetField<bool>(window, "isPreviewing"))
                 {
-                    throw new InvalidOperationException(
-                        $"RandomizeSeed expected {expectedRandomizedSeed} but produced {randomizedSettings.Seed}.");
+                    throw new InvalidOperationException("Preview unexpectedly stopped after settings changed.");
                 }
 
-                if (!randomizedStatus.Contains(randomizedSettings.Seed.ToString(), StringComparison.Ordinal))
+                if (!GetField<bool>(window, "hasPendingSettings"))
+                {
+                    throw new InvalidOperationException("Live preview settings were not marked pending after editing.");
+                }
+
+                var livePreviewStatus = GetField<string>(window, "statusMessage");
+                if (!livePreviewStatus.Contains("Preview reflects live settings. Generate to refresh exports.", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Unexpected live preview status: {livePreviewStatus}");
+                }
+
+                var livePreviewTexture = (Texture)Invoke(window, "RenderCurrentPreviewFrame");
+                if (livePreviewTexture is not RenderTexture livePreviewRenderTexture ||
+                    livePreviewRenderTexture.width != livePreviewSettings.ClampedResolution)
+                {
+                    throw new InvalidOperationException("Live preview did not refresh to the updated resolution.");
+                }
+
+                Invoke(window, "ScrubPreview", 1.5f);
+
+                var previewElapsed = GetField<float>(window, "previewElapsedSeconds");
+                if (!Mathf.Approximately(previewElapsed, 1.5f))
+                {
+                    throw new InvalidOperationException($"Expected scrubbed preview time 1.5s, got {previewElapsed:0.000}.");
+                }
+
+                var randomizedBefore = GetField<LoopLabRenderSettings>(window, "settings");
+                Invoke(window, "RandomizeSeed");
+                var randomizedAfter = GetField<LoopLabRenderSettings>(window, "settings");
+                var randomizedStatus = (string)GetField(window, "statusMessage");
+                var expectedRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(randomizedBefore.Seed);
+
+                if (randomizedAfter.Seed != expectedRandomizedSeed)
+                {
+                    throw new InvalidOperationException(
+                        $"RandomizeSeed expected {expectedRandomizedSeed} but produced {randomizedAfter.Seed}.");
+                }
+
+                if (!randomizedStatus.Contains(randomizedAfter.Seed.ToString(), StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException($"RandomizeSeed status did not expose the new seed: {randomizedStatus}");
+                }
+
+                if (randomizedAfter.Seed <= 0 || randomizedAfter.Seed > LoopLabRenderSettings.MaxSupportedSeedValue)
+                {
+                    throw new InvalidOperationException($"Randomized seed was out of range: {randomizedAfter.Seed}.");
                 }
 
                 SetField(window, "savedPresetName", "Geometric Randomized");
@@ -99,14 +144,15 @@ namespace Precondition.LoopLab.Editor
                 Invoke(window, "LoadSavedPreset", 1);
 
                 var restoredRandomizedSettings = (LoopLabRenderSettings)GetField(window, "settings");
-                if (!restoredRandomizedSettings.Equals(randomizedSettings))
+                if (!restoredRandomizedSettings.Equals(randomizedAfter))
                 {
                     throw new InvalidOperationException("LoadSavedPreset did not restore the saved randomized settings.");
                 }
 
                 Invoke(window, "GenerateLoop");
+
                 var randomizedGeneratedSettings = (LoopLabRenderSettings)GetField(window, "generatedSettings");
-                if (!randomizedGeneratedSettings.Equals(randomizedSettings))
+                if (!randomizedGeneratedSettings.Equals(randomizedAfter))
                 {
                     throw new InvalidOperationException("GenerateLoop did not lock the randomized preset settings.");
                 }
@@ -336,15 +382,16 @@ namespace Precondition.LoopLab.Editor
             return method.Invoke(null, arguments);
         }
 
-        private static object Invoke(object instance, string methodName, params object[] arguments)
+        private static object Invoke(object instance, string methodName, params object[] args)
         {
-            var method = instance.GetType().GetMethod(methodName, InstanceFlags);
+            var argumentTypes = Array.ConvertAll(args, argument => argument.GetType());
+            var method = instance.GetType().GetMethod(methodName, InstanceFlags, null, argumentTypes, null);
             if (method == null)
             {
                 throw new MissingMethodException(instance.GetType().FullName, methodName);
             }
 
-            return method.Invoke(instance, arguments);
+            return method.Invoke(instance, args);
         }
     }
 }
