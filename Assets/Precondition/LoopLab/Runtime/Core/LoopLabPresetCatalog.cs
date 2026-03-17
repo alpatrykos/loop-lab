@@ -58,7 +58,7 @@ namespace Precondition.LoopLab
             return preset switch
             {
                 LoopLabPresetKind.Landscape => 5.5f,
-                LoopLabPresetKind.Fluid => 6f,
+                LoopLabPresetKind.Fluid => 5.25f,
                 LoopLabPresetKind.Geometric => 8f,
                 _ => 5f
             };
