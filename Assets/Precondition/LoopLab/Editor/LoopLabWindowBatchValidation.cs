@@ -22,6 +22,8 @@ namespace Precondition.LoopLab.Editor
 
             try
             {
+                ResetWindowState(window);
+
                 var seedlessSettings = new LoopLabRenderSettings
                 {
                     Preset = LoopLabPresetKind.Geometric,
@@ -184,6 +186,18 @@ namespace Precondition.LoopLab.Editor
                 RestoreWindowState(stateKey, hadOriginalState, originalState);
                 UnityEngine.Object.DestroyImmediate(window);
             }
+        }
+
+        private static void ResetWindowState(object instance)
+        {
+            SetPreviewMode(instance, "Single");
+            SetGifDithering(instance, "None");
+            SetField(instance, "selectedSavedPresetIndex", -1);
+            SetField(instance, "savedPresetName", string.Empty);
+            SetField(instance, "exportDirectoryPath", string.Empty);
+
+            var savedPresets = GetField<IList>(instance, "savedPresets");
+            savedPresets.Clear();
         }
 
         private static void AssertGeneratedState(LoopLabRenderSettings generatedSettings, string statusMessage)

@@ -1,8 +1,10 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace Precondition.LoopLab.Editor
 {
@@ -14,6 +16,12 @@ namespace Precondition.LoopLab.Editor
 
         public static void Run()
         {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                throw new InvalidOperationException(
+                    "LoopLab Landscape preset validation requires graphics-enabled batchmode. Run without -nographics.");
+            }
+
             var outputDirectory = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "log", "landscape-validation"));
             Directory.CreateDirectory(outputDirectory);
 
@@ -29,11 +37,16 @@ namespace Precondition.LoopLab.Editor
 
         private static void ValidateWindowFlow(string outputDirectory)
         {
+            var stateKey = GetStateKey();
+            var hadOriginalState = EditorPrefs.HasKey(stateKey);
+            var originalState = hadOriginalState ? EditorPrefs.GetString(stateKey) : string.Empty;
             var window = ScriptableObject.CreateInstance<LoopLabWindow>();
             var renderer = new LoopRenderer();
 
             try
             {
+                ResetWindowState(window);
+
                 var settings = LoopLabRenderSettings.Default;
                 settings.Preset = LoopLabPresetKind.Landscape;
                 settings.DurationSeconds = 3f;
@@ -90,6 +103,7 @@ namespace Precondition.LoopLab.Editor
             finally
             {
                 renderer.Dispose();
+                RestoreWindowState(stateKey, hadOriginalState, originalState);
                 ScriptableObject.DestroyImmediate(window);
             }
         }
@@ -237,6 +251,45 @@ namespace Precondition.LoopLab.Editor
         {
             var bytes = texture.EncodeToPNG();
             File.WriteAllBytes(path, bytes);
+        }
+
+        private static void ResetWindowState(object instance)
+        {
+            SetField(instance, "isPreviewing", false);
+            SetField(instance, "hasGenerated", false);
+            SetField(instance, "hasPendingSettings", false);
+            SetField(instance, "previewElapsedSeconds", 0f);
+            SetField(instance, "previewStartTime", 0d);
+            SetField(instance, "selectedSavedPresetIndex", -1);
+            SetField(instance, "savedPresetName", string.Empty);
+            SetField(instance, "exportDirectoryPath", string.Empty);
+            SetField(instance, "statusMessage", "Ready");
+
+            var savedPresets = GetField<IList>(instance, "savedPresets");
+            savedPresets.Clear();
+        }
+
+        private static string GetStateKey()
+        {
+            var field = typeof(LoopLabWindow).GetField("StateKey", BindingFlags.NonPublic | BindingFlags.Static);
+            if (field == null)
+            {
+                throw new MissingFieldException(typeof(LoopLabWindow).FullName, "StateKey");
+            }
+
+            return (string)field.GetRawConstantValue();
+        }
+
+        private static void RestoreWindowState(string stateKey, bool hadOriginalState, string originalState)
+        {
+            if (hadOriginalState)
+            {
+                EditorPrefs.SetString(stateKey, originalState);
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(stateKey);
+            }
         }
 
         private static object Invoke(object instance, string methodName)
