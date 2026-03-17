@@ -72,6 +72,7 @@ namespace Precondition.LoopLab.Editor
                     throw new InvalidOperationException("Tiled preview render returned a null texture.");
                 }
 
+                SetGifDithering(window, "FloydSteinberg");
                 SetField(window, "savedPresetName", "Geometric Baseline");
                 Invoke(window, "SaveCurrentSettingsToPreset");
                 AssertSavedPresetCount(window, 1);
@@ -160,32 +161,19 @@ namespace Precondition.LoopLab.Editor
 
                 SetField(window, "exportDirectoryPath", "Temp/LoopLabExports");
                 Invoke(window, "SaveState");
-                AssertSavedWorkspaceState("Tiled2x2", "Temp/LoopLabExports", 2, "Geometric Randomized");
+                AssertSavedWorkspaceState("Tiled2x2", "Temp/LoopLabExports", 2, "Geometric Randomized", "FloydSteinberg");
 
                 var outputDirectory = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "Temp/LoopLabExports"));
-                var originalFfmpegOverride = Environment.GetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable);
-
-                try
-                {
-                    Environment.SetEnvironmentVariable(
-                        LoopLabFfmpegLocator.OverridePathEnvironmentVariable,
-                        Path.Combine(outputDirectory, "missing-ffmpeg"));
-                    Invoke(window, "ExportGif");
-                }
-                finally
-                {
-                    Environment.SetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable, originalFfmpegOverride);
-                }
+                Invoke(window, "ExportGif");
 
                 var exportStatus = (string)GetField(window, "statusMessage");
-                if (!exportStatus.Contains("ffmpeg", StringComparison.OrdinalIgnoreCase) ||
-                    !exportStatus.Contains($"seed {randomizedGeneratedSettings.Seed}", StringComparison.Ordinal) ||
-                    !exportStatus.Contains($"{randomizedGeneratedSettings.FrameCount} frames @ {randomizedGeneratedSettings.FramesPerSecond} FPS", StringComparison.Ordinal) ||
-                    !exportStatus.Contains(outputDirectory, StringComparison.Ordinal))
+                var exportedPath = ExtractExportedPath(exportStatus, "GIF");
+                if (!File.Exists(exportedPath))
                 {
-                    throw new InvalidOperationException($"Export failure did not preserve ffmpeg fallback context: {exportStatus}");
+                    throw new InvalidOperationException($"Expected GIF export at {exportedPath}, but the file was not found.");
                 }
 
+                AssertExportedGif(exportedPath, randomizedGeneratedSettings);
                 AssertNoTemporaryWorkspaces(outputDirectory);
                 AssertExportLifecycleCleanup(outputDirectory);
 
@@ -282,7 +270,8 @@ namespace Precondition.LoopLab.Editor
             string expectedPreviewMode,
             string expectedExportDirectoryPath,
             int expectedSavedPresetCount,
-            string expectedSavedPresetName)
+            string expectedSavedPresetName,
+            string expectedDitheringMode)
         {
             var restoredWindow = ScriptableObject.CreateInstance<LoopLabWindow>();
 
@@ -305,11 +294,84 @@ namespace Precondition.LoopLab.Editor
                         $"Expected selected preset name {expectedSavedPresetName}, got {restoredSavedPresetName}.");
                 }
 
+                var restoredDitheringMode = GetField(restoredWindow, "gifDithering");
+                if (!string.Equals(restoredDitheringMode?.ToString(), expectedDitheringMode, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected GIF dithering mode {expectedDitheringMode}, got {restoredDitheringMode}.");
+                }
+
                 AssertSavedPresetCount(restoredWindow, expectedSavedPresetCount);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(restoredWindow);
+            }
+        }
+
+        private static void SetGifDithering(object instance, string ditheringModeName)
+        {
+            var field = instance.GetType().GetField("gifDithering", InstanceFlags);
+            if (field == null)
+            {
+                throw new MissingFieldException(instance.GetType().FullName, "gifDithering");
+            }
+
+            field.SetValue(instance, Enum.Parse(field.FieldType, ditheringModeName));
+        }
+
+        private static string ExtractExportedPath(string exportStatus, string formatLabel)
+        {
+            var prefix = $"{formatLabel} export wrote ";
+            if (!exportStatus.StartsWith(prefix, StringComparison.Ordinal) ||
+                !exportStatus.EndsWith(".", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Unexpected export status message: {exportStatus}");
+            }
+
+            return exportStatus.Substring(prefix.Length, exportStatus.Length - prefix.Length - 1);
+        }
+
+        private static void AssertExportedGif(string exportedPath, LoopLabRenderSettings generatedSettings)
+        {
+            var inspection = GifInspector.InspectFile(exportedPath);
+            var expectedDelays = GifEncoder.BuildFrameDelays(generatedSettings.FrameCount, generatedSettings.FramesPerSecond);
+
+            if (!string.Equals(inspection.Version, "GIF89a", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Expected GIF89a export, got {inspection.Version}.");
+            }
+
+            if (inspection.Width != generatedSettings.ClampedResolution || inspection.Height != generatedSettings.ClampedResolution)
+            {
+                throw new InvalidOperationException(
+                    $"Exported GIF dimensions {inspection.Width}x{inspection.Height} did not match the generated resolution {generatedSettings.ClampedResolution}.");
+            }
+
+            if (!inspection.IsInfiniteLoop)
+            {
+                throw new InvalidOperationException("Exported GIF is missing infinite loop metadata.");
+            }
+
+            if (inspection.FrameCount != generatedSettings.FrameCount)
+            {
+                throw new InvalidOperationException(
+                    $"Exported GIF frame count {inspection.FrameCount} did not match generated frame count {generatedSettings.FrameCount}.");
+            }
+
+            if (inspection.FrameDelays.Length != expectedDelays.Length)
+            {
+                throw new InvalidOperationException(
+                    $"Exported GIF contains {inspection.FrameDelays.Length} frame delay entries, expected {expectedDelays.Length}.");
+            }
+
+            for (var index = 0; index < expectedDelays.Length; index++)
+            {
+                if (inspection.FrameDelays[index] != expectedDelays[index])
+                {
+                    throw new InvalidOperationException(
+                        $"Exported GIF delay for frame {index} was {inspection.FrameDelays[index]}, expected {expectedDelays[index]}.");
+                }
             }
         }
 
