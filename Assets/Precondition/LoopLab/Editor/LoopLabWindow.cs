@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using UnityEditor;
 using UnityEngine;
 using Precondition.LoopLab.Editor.Export;
@@ -23,6 +24,7 @@ namespace Precondition.LoopLab.Editor
         private bool hasPendingSettings;
         private bool isPreviewing;
         private PreviewMode previewMode = PreviewMode.Single;
+        private float previewElapsedSeconds;
         private double previewStartTime;
         private string statusMessage = "Ready";
 
@@ -41,6 +43,7 @@ namespace Precondition.LoopLab.Editor
             public bool HasPendingSettings;
             public bool IsPreviewing;
             public PreviewMode PreviewMode = PreviewMode.Single;
+            public float PreviewElapsedSeconds;
             public double PreviewStartTime;
         }
 
@@ -78,6 +81,7 @@ namespace Precondition.LoopLab.Editor
             LoadState();
             renderer ??= new LoopRenderer();
             RefreshBoundaryValidation();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
             EditorApplication.update += HandleEditorUpdate;
         }
 
@@ -118,9 +122,17 @@ namespace Precondition.LoopLab.Editor
 
             if (EditorGUI.EndChangeCheck())
             {
-                hasPendingSettings = true;
-                isPreviewing = false;
-                statusMessage = "Settings updated. Generate to refresh loop.";
+                HandleSettingsChanged("Settings updated.");
+            }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.FlexibleSpace();
+
+                if (GUILayout.Button("Randomize Seed", GUILayout.Width(128f)))
+                {
+                    RandomizeSeed();
+                }
             }
 
             EditorGUI.BeginChangeCheck();
@@ -144,12 +156,9 @@ namespace Precondition.LoopLab.Editor
                     GenerateLoop();
                 }
 
-                using (new EditorGUI.DisabledGroupScope(!hasGenerated || hasPendingSettings))
+                if (GUILayout.Button(isPreviewing ? "Pause" : "Play"))
                 {
-                    if (GUILayout.Button(isPreviewing ? "Pause Preview" : "Preview"))
-                    {
-                        TogglePreview();
-                    }
+                    TogglePreview();
                 }
 
                 using (new EditorGUI.DisabledGroupScope(!hasGenerated || hasPendingSettings))
@@ -194,15 +203,20 @@ namespace Precondition.LoopLab.Editor
 
             if (!hasGenerated)
             {
-                EditorGUILayout.HelpBox("A test frame is rendered for the current settings. Generate to lock loop state for exports.", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    "Preview renders current settings live. Generate to lock a loop for exports and boundary QA.",
+                    MessageType.Info);
             }
 
-            if (hasPendingSettings)
+            if (hasGenerated && hasPendingSettings)
             {
-                EditorGUILayout.HelpBox("Settings have changed since last generation.", MessageType.Warning);
+                EditorGUILayout.HelpBox(
+                    "Preview reflects live settings. Generate again to refresh the saved loop used for exports and boundary QA.",
+                    MessageType.Warning);
             }
 
             DrawBoundaryValidationSummary();
+            DrawPreviewControls();
 
             DrawPreview();
 
@@ -215,15 +229,19 @@ namespace Precondition.LoopLab.Editor
                 EditorGUILayout.LabelField("Current Contrast", settings.ContrastMode.ToString());
             }
 
-            EditorGUILayout.LabelField("Generated Preset", LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset));
-            if (LoopLabPresetCatalog.SupportsContrastMode(generatedSettings.Preset))
+            EditorGUILayout.LabelField(
+                "Generated Preset",
+                hasGenerated ? LoopLabPresetCatalog.GetDisplayName(generatedSettings.Preset) : "Not generated yet");
+            if (hasGenerated && LoopLabPresetCatalog.SupportsContrastMode(generatedSettings.Preset))
             {
                 EditorGUILayout.LabelField("Generated Contrast", generatedSettings.ContrastMode.ToString());
             }
 
-            EditorGUILayout.LabelField("Generated Seed", generatedSettings.Seed.ToString());
-            EditorGUILayout.LabelField("Generated Frame Count", generatedSettings.FrameCount.ToString());
-            EditorGUILayout.LabelField("Shader", LoopLabPresetCatalog.GetShaderName(generatedSettings.Preset));
+            EditorGUILayout.LabelField("Generated Seed", hasGenerated ? generatedSettings.Seed.ToString() : "Not generated yet");
+            EditorGUILayout.LabelField(
+                "Generated Frame Count",
+                hasGenerated ? generatedSettings.FrameCount.ToString() : "Not generated yet");
+            EditorGUILayout.LabelField("Shader", LoopLabPresetCatalog.GetShaderName(GetPreviewSettings().Preset));
         }
 
         private void DrawPreview()
@@ -245,14 +263,50 @@ namespace Precondition.LoopLab.Editor
             }
         }
 
+        private void DrawPreviewControls()
+        {
+            var previewSettings = GetPreviewSettings();
+            var previewElapsed = GetPreviewElapsedForSettings(previewSettings);
+            var previewFrame = LoopLabRenderSettings.GetPreviewFrameIndex(
+                previewElapsed,
+                previewSettings.DurationSeconds,
+                previewSettings.FrameCount);
+            var previewSource = hasGenerated && !hasPendingSettings ? "Generated loop" : "Live settings";
+
+            GUILayout.Space(12f);
+            EditorGUILayout.LabelField("Preview Controls", EditorStyles.boldLabel);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Source", previewSource);
+                EditorGUILayout.LabelField("Frame", $"{previewFrame + 1} / {previewSettings.FrameCount}", GUILayout.Width(112f));
+            }
+
+            EditorGUI.BeginChangeCheck();
+            var scrubbedTime = EditorGUILayout.Slider(
+                "Timeline",
+                previewElapsed,
+                0f,
+                GetPreviewScrubMaximum(previewSettings));
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                ScrubPreview(scrubbedTime);
+            }
+
+            EditorGUILayout.LabelField(
+                "Preview Time",
+                $"{previewElapsed:0.00}s / {previewSettings.ValidatedDurationSeconds:0.00}s");
+        }
+
         private void GenerateLoop()
         {
             renderer ??= new LoopRenderer();
+            previewElapsedSeconds = GetPreviewElapsedForSettings(settings.GetValidated());
             generatedSettings = settings.GetValidated();
             hasGenerated = true;
-            hasPendingSettings = false;
-            isPreviewing = false;
-            previewStartTime = EditorApplication.timeSinceStartup;
+            UpdatePendingState();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
             renderer.Render(generatedSettings, 0);
             RefreshBoundaryValidation();
             var generationSummary =
@@ -267,21 +321,18 @@ namespace Precondition.LoopLab.Editor
 
         private void TogglePreview()
         {
-            if (!hasGenerated || hasPendingSettings)
-            {
-                statusMessage = "Generate before previewing.";
-                return;
-            }
-
-            isPreviewing = !isPreviewing;
             if (isPreviewing)
             {
-                previewStartTime = EditorApplication.timeSinceStartup;
-                statusMessage = "Preview running.";
+                previewElapsedSeconds = GetCurrentPreviewElapsedSeconds();
+                isPreviewing = false;
+                statusMessage = "Preview paused.";
             }
             else
             {
-                statusMessage = "Preview paused.";
+                previewElapsedSeconds = GetCurrentPreviewElapsedSeconds();
+                previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+                isPreviewing = true;
+                statusMessage = "Preview running.";
             }
 
             Repaint();
@@ -357,18 +408,9 @@ namespace Precondition.LoopLab.Editor
                 return null;
             }
 
-            if (isPreviewing && hasGenerated && !hasPendingSettings)
-            {
-                var elapsed = (float)(EditorApplication.timeSinceStartup - previewStartTime);
-                return renderer.RenderPreview(generatedSettings, elapsed);
-            }
-
-            if (hasGenerated && !hasPendingSettings)
-            {
-                return renderer.Render(generatedSettings, 0);
-            }
-
-            return renderer.Render(settings.GetValidated(), 0);
+            var previewSettings = GetPreviewSettings();
+            var previewElapsed = GetPreviewElapsedForSettings(previewSettings);
+            return renderer.RenderPreview(previewSettings, previewElapsed);
         }
 
         private void DrawBoundaryValidation()
@@ -542,6 +584,7 @@ namespace Precondition.LoopLab.Editor
                 hasPendingSettings = false;
                 isPreviewing = false;
                 previewMode = PreviewMode.Single;
+                previewElapsedSeconds = 0f;
                 return;
             }
 
@@ -554,27 +597,29 @@ namespace Precondition.LoopLab.Editor
                 hasPendingSettings = false;
                 isPreviewing = false;
                 previewMode = PreviewMode.Single;
+                previewElapsedSeconds = 0f;
                 return;
             }
 
             settings = restoredState.Settings;
             generatedSettings = restoredState.GeneratedSettings.GetValidated();
             hasGenerated = restoredState.HasGenerated;
-            hasPendingSettings = restoredState.HasPendingSettings;
             previewMode = restoredState.PreviewMode;
-
-            if (!hasGenerated || hasPendingSettings)
+            UpdatePendingState();
+            isPreviewing = restoredState.IsPreviewing;
+            previewElapsedSeconds = restoredState.PreviewElapsedSeconds;
+            if (previewElapsedSeconds <= 0f && isPreviewing && restoredState.PreviewStartTime > 0d)
             {
-                isPreviewing = false;
-            }
-            else
-            {
-                isPreviewing = restoredState.IsPreviewing;
+                previewElapsedSeconds = LoopLabRenderSettings.NormalizePreviewElapsedSeconds(
+                    (float)(EditorApplication.timeSinceStartup - restoredState.PreviewStartTime),
+                    GetPreviewSettings().DurationSeconds);
             }
 
-            previewStartTime = isPreviewing && restoredState.PreviewStartTime > EditorApplication.timeSinceStartup
-                ? EditorApplication.timeSinceStartup
-                : restoredState.PreviewStartTime;
+            previewElapsedSeconds = Mathf.Clamp(
+                previewElapsedSeconds,
+                0f,
+                GetPreviewScrubMaximum(GetPreviewSettings()));
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
         }
 
         private void SaveState()
@@ -587,6 +632,7 @@ namespace Precondition.LoopLab.Editor
                 HasPendingSettings = hasPendingSettings,
                 IsPreviewing = isPreviewing,
                 PreviewMode = previewMode,
+                PreviewElapsedSeconds = GetCurrentPreviewElapsedSeconds(),
                 PreviewStartTime = previewStartTime
             };
 
@@ -602,8 +648,88 @@ namespace Precondition.LoopLab.Editor
 
             if (isPreviewing)
             {
+                previewElapsedSeconds = GetCurrentPreviewElapsedSeconds();
                 Repaint();
             }
+        }
+
+        private void HandleSettingsChanged(string changeSummary)
+        {
+            previewElapsedSeconds = GetPreviewElapsedForSettings(settings.GetValidated());
+            UpdatePendingState();
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+            statusMessage = BuildSettingsChangedStatus(changeSummary);
+            Repaint();
+        }
+
+        private string BuildSettingsChangedStatus(string changeSummary)
+        {
+            if (hasGenerated && hasPendingSettings)
+            {
+                return changeSummary + " Preview reflects live settings. Generate to refresh exports.";
+            }
+
+            if (hasGenerated)
+            {
+                return changeSummary + " Preview matches the generated loop.";
+            }
+
+            return changeSummary + " Preview updated.";
+        }
+
+        private LoopLabRenderSettings GetPreviewSettings()
+        {
+            return hasGenerated && !hasPendingSettings
+                ? generatedSettings
+                : settings.GetValidated();
+        }
+
+        private float GetPreviewElapsedForSettings(LoopLabRenderSettings previewSettings)
+        {
+            if (isPreviewing)
+            {
+                return LoopLabRenderSettings.NormalizePreviewElapsedSeconds(
+                    (float)(EditorApplication.timeSinceStartup - previewStartTime),
+                    previewSettings.DurationSeconds);
+            }
+
+            return Mathf.Clamp(
+                previewElapsedSeconds,
+                0f,
+                GetPreviewScrubMaximum(previewSettings));
+        }
+
+        private static float GetPreviewScrubMaximum(LoopLabRenderSettings previewSettings)
+        {
+            if (previewSettings.FrameCount <= 1)
+            {
+                return 0f;
+            }
+
+            return previewSettings.ValidatedDurationSeconds - (previewSettings.ValidatedDurationSeconds / previewSettings.FrameCount);
+        }
+
+        private float GetCurrentPreviewElapsedSeconds()
+        {
+            return GetPreviewElapsedForSettings(GetPreviewSettings());
+        }
+
+        private void RandomizeSeed()
+        {
+            settings.Seed = RandomNumberGenerator.GetInt32(1, LoopLabRenderSettings.MaxSupportedSeedValue + 1);
+            HandleSettingsChanged("Seed randomized.");
+        }
+
+        private void ScrubPreview(float previewSeconds)
+        {
+            previewElapsedSeconds = Mathf.Clamp(previewSeconds, 0f, GetPreviewScrubMaximum(GetPreviewSettings()));
+            previewStartTime = EditorApplication.timeSinceStartup - previewElapsedSeconds;
+            Repaint();
+        }
+
+        private void UpdatePendingState()
+        {
+            hasPendingSettings = hasGenerated && !settings.GetValidated().Equals(generatedSettings);
         }
     }
 }
