@@ -8,6 +8,16 @@ namespace Precondition.LoopLab
 
         public static float GetPhase(int frameIndex, int totalFrames)
         {
+            return GetPhaseFromFrame(frameIndex, totalFrames);
+        }
+
+        public static float GetPhase(float timeSeconds, float durationSeconds)
+        {
+            return GetPhaseFromTime(timeSeconds, durationSeconds);
+        }
+
+        public static float GetPhaseFromFrame(int frameIndex, int totalFrames)
+        {
             if (totalFrames <= 0)
             {
                 return 0f;
@@ -16,7 +26,7 @@ namespace Precondition.LoopLab
             return Mathf.Repeat(frameIndex / (float)totalFrames, 1f);
         }
 
-        public static float GetPhase(float timeSeconds, float durationSeconds)
+        public static float GetPhaseFromTime(float timeSeconds, float durationSeconds)
         {
             if (durationSeconds <= 0f)
             {
@@ -26,10 +36,24 @@ namespace Precondition.LoopLab
             return Mathf.Repeat(timeSeconds / durationSeconds, 1f);
         }
 
+        public static float GetTheta(float phase)
+        {
+            return phase * FullTurn;
+        }
+
+        public static float GetCos(float phase)
+        {
+            return Mathf.Cos(GetTheta(phase));
+        }
+
+        public static float GetSin(float phase)
+        {
+            return Mathf.Sin(GetTheta(phase));
+        }
+
         public static Vector2 GetLoopVector(float phase)
         {
-            var radians = phase * FullTurn;
-            return new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
+            return new Vector2(GetCos(phase), GetSin(phase));
         }
     }
 }
