@@ -126,8 +126,8 @@ Shader "LoopLab/Geometric"
 
                 float2 domain = float2(input.uv.x * columns, input.uv.y * rows * sqrt3);
                 domain += float2(
-                    _LoopVector.x * 0.34 + _LoopVector.y * 0.12,
-                    _LoopVector.y * 0.26);
+                    _LoopVector.x * 0.18 + _LoopVector.y * 0.06,
+                    _LoopVector.y * 0.14);
 
                 float2 seedOffset = float2(_Seed * 0.0131, _Seed * 0.0177);
                 float2 cellCenter;
@@ -137,39 +137,39 @@ Shader "LoopLab/Geometric"
                 float spinDirection = cellHash >= 0.5 ? 1.0 : -1.0;
                 float seedPhase = cellHash * fullTurn;
 
-                float scalePulse = 1.0 + 0.18 * sin(theta + seedPhase);
-                float2 orbit = 0.18 * float2(
+                float scalePulse = 1.0 + 0.10 * sin(theta + seedPhase * 0.8);
+                float2 orbit = 0.08 * float2(
                     cos(theta + seedPhase),
                     sin(theta + seedPhase));
 
-                float2 outerDomain = Rotate2D(local + orbit, theta * spinDirection + seedPhase);
-                float2 innerDomain = Rotate2D(local - orbit * 0.72, -theta * spinDirection + seedPhase);
+                float2 outerDomain = Rotate2D(local + orbit * 0.32, theta * spinDirection * 0.42 + seedPhase * 0.35);
+                float2 innerDomain = Rotate2D(local - orbit * 0.18, -theta * spinDirection * 0.68 + seedPhase * 0.22);
 
-                float outerHex = SdHexagon(outerDomain / scalePulse, 0.36);
-                float innerScale = 0.63 + 0.08 * cos(theta + seedPhase);
-                float innerHex = SdHexagon(innerDomain / innerScale, 0.17);
+                float outerHex = SdHexagon(outerDomain / scalePulse, 0.40);
+                float innerScale = 0.68 + 0.05 * cos(theta + seedPhase);
+                float innerHex = SdHexagon(innerDomain / innerScale, 0.15);
 
                 float outerFill = FillMask(outerHex);
-                float outerStroke = StrokeMask(outerHex, 0.03);
+                float outerStroke = StrokeMask(outerHex, 0.026);
                 float innerFill = FillMask(innerHex);
-                float innerStroke = StrokeMask(innerHex, 0.022);
+                float innerStroke = StrokeMask(innerHex, 0.018);
 
                 float localAngle = atan2(outerDomain.y, outerDomain.x);
                 float localRadius = length(outerDomain);
-                float spokePattern = 0.5 + 0.5 * cos(localAngle * 6.0 + theta * 2.0 + seedPhase);
-                float radialPattern = 0.5 + 0.5 * cos(localRadius * 18.0 - theta * 2.0 + seedPhase * 2.0);
+                float spokePattern = 0.5 + 0.5 * cos(localAngle * 6.0 + theta * 1.2 + seedPhase);
+                float radialPattern = 0.5 + 0.5 * cos(localRadius * 14.0 - theta * 1.4 + seedPhase * 1.6);
                 float detailBlend = saturate(spokePattern * 0.65 + radialPattern * 0.35);
 
-                float bandPattern = 0.5 + 0.5 * cos((input.uv.x * 2.0 + input.uv.y) * fullTurn + theta);
+                float bandPattern = 0.5 + 0.5 * cos((input.uv.y * 1.5 - input.uv.x * 0.75) * fullTurn + theta * 0.6);
 
-                float3 shadowColor = _BaseColor.rgb * 0.72;
-                float3 midColor = lerp(_BaseColor.rgb, _AccentColor.rgb, 0.32);
-                float3 color = lerp(shadowColor, _BaseColor.rgb, bandPattern * 0.22 + 0.08);
+                float3 shadowColor = _BaseColor.rgb * 0.82;
+                float3 midColor = lerp(_BaseColor.rgb, _AccentColor.rgb, 0.24);
+                float3 color = lerp(shadowColor, _BaseColor.rgb, bandPattern * 0.16 + 0.06);
 
-                color = lerp(color, midColor, outerFill * (0.34 + detailBlend * 0.22));
-                color = lerp(color, _AccentColor.rgb, outerStroke * 0.95);
-                color = lerp(color, _AccentColor.rgb, innerFill * (0.55 + detailBlend * 0.25));
-                color = lerp(color, shadowColor, innerStroke * 0.30);
+                color = lerp(color, midColor, outerFill * (0.28 + detailBlend * 0.18));
+                color = lerp(color, _AccentColor.rgb, outerStroke * 0.88);
+                color = lerp(color, _AccentColor.rgb * 0.92, innerFill * (0.42 + detailBlend * 0.18));
+                color = lerp(color, shadowColor * 0.9, innerStroke * 0.24);
 
                 return half4(saturate(color), 1.0);
             }

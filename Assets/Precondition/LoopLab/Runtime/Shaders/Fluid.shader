@@ -107,39 +107,40 @@ Shader "LoopLab/Fluid"
                 float phaseAngle = _Phase * fullTurn;
                 float2 loopVector = _LoopVector.xy;
                 float2 centered = input.uv * 2.0 - 1.0;
-                centered.x *= 1.06;
+                centered.x *= 0.98;
 
-                float durationBlend = saturate((_Duration - 2.0) * 0.5);
-                float2 domain = Rotate(centered, loopVector.x * 0.18 + seedOffset * 0.4);
+                float durationBlend = saturate((_Duration - 1.8) * 0.45);
+                float2 domain = Rotate(centered, loopVector.x * 0.24 + seedOffset * 0.35);
                 float2 primaryFlow = CurlLikeFlow(domain, loopVector, seedOffset);
-                float2 advected = domain + primaryFlow * lerp(0.09, 0.13, durationBlend);
+                float2 advected = domain + primaryFlow * lerp(0.10, 0.15, durationBlend);
 
                 float2 rotatedLoop = float2(-loopVector.y, loopVector.x);
                 float2 secondaryFlow = CurlLikeFlow(advected * 1.31 + float2(0.18, -0.07), rotatedLoop, seedOffset + 2.7);
-                advected += secondaryFlow * lerp(0.035, 0.065, durationBlend);
+                advected += secondaryFlow * lerp(0.04, 0.07, durationBlend);
 
                 float2 tertiaryFlow = CurlLikeFlow(advected * 1.72 - primaryFlow * 0.26, float2(loopVector.y, -loopVector.x), seedOffset + 5.1);
-                advected += tertiaryFlow * 0.02;
+                advected += tertiaryFlow * 0.026;
 
                 float flowMagnitude = saturate(length(primaryFlow) * 0.34 + length(secondaryFlow) * 0.26 + length(tertiaryFlow) * 0.2);
                 float density = FluidDensity(advected, loopVector, seedOffset);
                 float body = smoothstep(-0.32, 0.78, density + flowMagnitude * 0.42);
 
                 float highlightField = FluidDensity(advected * 1.48 - secondaryFlow * 0.3 + float2(0.06, -0.04), rotatedLoop, seedOffset + 7.4);
-                float highlight = smoothstep(0.22, 0.88, body * 0.58 + flowMagnitude * 0.72 + highlightField * 0.24);
+                float highlight = smoothstep(0.24, 0.86, body * 0.54 + flowMagnitude * 0.7 + highlightField * 0.28);
 
                 float interiorBlend = smoothstep(-0.85, 0.62, density - flowMagnitude * 0.28);
                 float radius = length(centered);
-                float depth = smoothstep(1.28, 0.08, radius + density * 0.08);
+                float radialFocus = smoothstep(1.08, 0.12, radius);
+                float depth = smoothstep(1.18, 0.04, radius + density * 0.1);
                 float phaseLift = 0.5 + 0.5 * sin(phaseAngle + dot(advected, float2(0.85, -1.1)) * 0.9);
 
-                float3 baseBlend = lerp(_BaseColor.rgb * 0.82, _AccentColor.rgb, body);
-                float3 innerColor = lerp(baseBlend, _BaseColor.rgb * 0.56 + _AccentColor.rgb * 0.38, interiorBlend * 0.24);
+                float3 baseBlend = lerp(_BaseColor.rgb * 0.7, _AccentColor.rgb, body * (0.84 + radialFocus * 0.16));
+                float3 innerColor = lerp(baseBlend, _BaseColor.rgb * 0.48 + _AccentColor.rgb * 0.44, interiorBlend * 0.3 + radialFocus * 0.08);
                 float3 highlightColor = lerp(_AccentColor.rgb * 1.05, float3(0.88, 0.97, 1.0), 0.55);
                 float3 color = lerp(_BaseColor.rgb * 0.74, innerColor, depth);
-                color += highlightColor * highlight * (0.18 + phaseLift * 0.08);
-                color += flowMagnitude * (_AccentColor.rgb * 0.06);
-                color = lerp(color, _BaseColor.rgb * 0.68, smoothstep(0.92, 1.35, radius));
+                color += highlightColor * highlight * (0.16 + phaseLift * 0.09 + radialFocus * 0.05);
+                color += flowMagnitude * (_AccentColor.rgb * 0.08);
+                color = lerp(color, _BaseColor.rgb * 0.74, smoothstep(0.82, 1.28, radius));
 
                 return half4(saturate(color), 1.0);
             }
