@@ -1,4 +1,5 @@
 using System;
+using Debug = UnityEngine.Debug;
 
 namespace Precondition.LoopLab.Editor.Export
 {
@@ -6,9 +7,23 @@ namespace Precondition.LoopLab.Editor.Export
     {
         public static void Export(LoopLabRenderSettings settings, string outputDirectory)
         {
-            throw new InvalidOperationException(
-                $"GIF export is not implemented in AUT-74. This scaffold only establishes the project structure. " +
-                $"Received generated settings: seed {settings.Seed}, {settings.FrameCount} frames @ {settings.FramesPerSecond} FPS.");
+            var request = new LoopLabExportRequest("GIF", ".gif", settings, outputDirectory);
+            if (!LoopLabFfmpegLocator.TryResolveExecutable(out _, out var resolutionSource))
+            {
+                var missingFfmpegMessage = LoopLabFfmpegLocator.GetMissingExecutableMessage(request.FormatLabel, request.Settings, resolutionSource);
+                Debug.LogWarning($"[LoopLabExport] {missingFfmpegMessage}");
+                throw new InvalidOperationException(missingFfmpegMessage);
+            }
+
+            LoopLabExportSession.Run(request, workspace =>
+            {
+                LoopLabExportFrameWriter.WritePngFrames(request.Settings, workspace);
+
+                throw new InvalidOperationException(
+                    "GIF export encoding is not implemented yet. " +
+                    "Temporary frames were cleaned up and no output file was written. " +
+                    request.SettingsSummary);
+            });
         }
     }
 }

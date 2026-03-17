@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Reflection;
+using Precondition.LoopLab.Editor.Export;
 using UnityEditor;
 using UnityEngine;
 
@@ -72,14 +74,31 @@ namespace Precondition.LoopLab.Editor
                 Invoke(window, "SaveState");
                 AssertSavedPreviewMode("Tiled2x2");
 
-                Invoke(window, "ExportGif");
+                var exportDirectory = GetAbsoluteExportDirectory();
+                var originalFfmpegOverride = Environment.GetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable);
+
+                try
+                {
+                    Environment.SetEnvironmentVariable(
+                        LoopLabFfmpegLocator.OverridePathEnvironmentVariable,
+                        Path.Combine(exportDirectory, "missing-ffmpeg"));
+                    Invoke(window, "ExportGif");
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable, originalFfmpegOverride);
+                }
 
                 var exportStatus = (string)GetField(window, "statusMessage");
-                if (!exportStatus.Contains($"seed {firstGenerated.Seed}", StringComparison.Ordinal) ||
+                if (!exportStatus.Contains("ffmpeg", StringComparison.OrdinalIgnoreCase) ||
+                    !exportStatus.Contains($"seed {firstGenerated.Seed}", StringComparison.Ordinal) ||
                     !exportStatus.Contains($"{firstGenerated.FrameCount} frames @ {firstGenerated.FramesPerSecond} FPS", StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException($"Export failure did not preserve normalized settings context: {exportStatus}");
+                    throw new InvalidOperationException($"Export failure did not preserve ffmpeg fallback context: {exportStatus}");
                 }
+
+                AssertNoTemporaryWorkspaces(exportDirectory);
+                AssertExportLifecycleCleanup(exportDirectory);
 
                 Debug.Log("LoopLabWindow batch validation passed.");
             }
@@ -232,6 +251,142 @@ namespace Precondition.LoopLab.Editor
             }
 
             return (string)field.GetRawConstantValue();
+        }
+
+        private static string GetAbsoluteExportDirectory()
+        {
+            return (string)InvokeStatic(typeof(LoopLabWindow), "GetAbsoluteExportDirectory");
+        }
+
+        private static void AssertExportLifecycleCleanup(string exportDirectory)
+        {
+            var validationDirectory = Path.Combine(exportDirectory, "BatchValidation");
+            if (Directory.Exists(validationDirectory))
+            {
+                Directory.Delete(validationDirectory, true);
+            }
+
+            Directory.CreateDirectory(validationDirectory);
+
+            try
+            {
+                AssertSuccessfulExportPublishesOutput(validationDirectory);
+                AssertFailedExportCleansTemporaryFiles(validationDirectory);
+                AssertCanceledExportCleansTemporaryFiles(validationDirectory);
+                AssertStaleWorkspaceCleanup(validationDirectory);
+                AssertNoTemporaryWorkspaces(validationDirectory);
+            }
+            finally
+            {
+                if (Directory.Exists(validationDirectory))
+                {
+                    Directory.Delete(validationDirectory, true);
+                }
+            }
+        }
+
+        private static void AssertSuccessfulExportPublishesOutput(string validationDirectory)
+        {
+            var request = new LoopLabExportRequest("Validation GIF", ".gif", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = LoopLabExportSession.Run(request, workspace =>
+            {
+                File.WriteAllText(workspace.GetFramePath(0), "frame");
+                File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 1, 2, 3, 4 });
+            });
+
+            if (!File.Exists(finalOutputPath))
+            {
+                throw new InvalidOperationException($"Expected a published output at {finalOutputPath}.");
+            }
+
+            File.Delete(finalOutputPath);
+            AssertNoTemporaryWorkspaces(validationDirectory);
+        }
+
+        private static void AssertFailedExportCleansTemporaryFiles(string validationDirectory)
+        {
+            var request = new LoopLabExportRequest("Validation MP4", ".mp4", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = Path.Combine(validationDirectory, request.OutputFileName);
+
+            try
+            {
+                LoopLabExportSession.Run(request, workspace =>
+                {
+                    File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 9, 8, 7 });
+                    throw new InvalidOperationException("Simulated export failure.");
+                });
+                throw new InvalidOperationException("Expected simulated export failure.");
+            }
+            catch (InvalidOperationException exception) when (exception.Message == "Simulated export failure.")
+            {
+            }
+
+            if (File.Exists(finalOutputPath))
+            {
+                throw new InvalidOperationException($"Failure path left a partial output at {finalOutputPath}.");
+            }
+
+            AssertNoTemporaryWorkspaces(validationDirectory);
+        }
+
+        private static void AssertCanceledExportCleansTemporaryFiles(string validationDirectory)
+        {
+            var request = new LoopLabExportRequest("Validation Cancel", ".gif", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = Path.Combine(validationDirectory, request.OutputFileName);
+
+            try
+            {
+                LoopLabExportSession.Run(request, workspace =>
+                {
+                    File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 6, 5, 4 });
+                    throw new OperationCanceledException("Simulated export cancel.");
+                });
+                throw new InvalidOperationException("Expected simulated export cancel.");
+            }
+            catch (OperationCanceledException exception) when (exception.Message == "Simulated export cancel.")
+            {
+            }
+
+            if (File.Exists(finalOutputPath))
+            {
+                throw new InvalidOperationException($"Cancel path left a partial output at {finalOutputPath}.");
+            }
+
+            AssertNoTemporaryWorkspaces(validationDirectory);
+        }
+
+        private static void AssertStaleWorkspaceCleanup(string validationDirectory)
+        {
+            var staleDirectory = Path.Combine(
+                validationDirectory,
+                LoopLabExportSession.TemporaryDirectoryPrefix + "stale-validation-workspace");
+            Directory.CreateDirectory(staleDirectory);
+            File.WriteAllText(Path.Combine(staleDirectory, "stale.txt"), "stale");
+            Directory.SetLastWriteTimeUtc(staleDirectory, DateTime.UtcNow - TimeSpan.FromDays(2));
+
+            var request = new LoopLabExportRequest("Validation Cleanup", ".gif", LoopLabRenderSettings.Default, validationDirectory);
+            var finalOutputPath = LoopLabExportSession.Run(request, workspace =>
+            {
+                File.WriteAllBytes(workspace.StagedOutputPath, new byte[] { 0x1 });
+            });
+
+            if (Directory.Exists(staleDirectory))
+            {
+                throw new InvalidOperationException($"Expected stale workspace cleanup for {staleDirectory}.");
+            }
+
+            if (File.Exists(finalOutputPath))
+            {
+                File.Delete(finalOutputPath);
+            }
+        }
+
+        private static void AssertNoTemporaryWorkspaces(string outputDirectory)
+        {
+            if (LoopLabExportSession.HasTemporaryWorkspaces(outputDirectory))
+            {
+                throw new InvalidOperationException($"Temporary workspaces were not cleaned from {outputDirectory}.");
+            }
         }
 
         private static void RestoreWindowState(string stateKey, bool hadOriginalState, string originalState)
