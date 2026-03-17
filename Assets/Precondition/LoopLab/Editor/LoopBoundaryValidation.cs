@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Precondition.LoopLab.Editor.Export;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -204,6 +205,16 @@ namespace Precondition.LoopLab.Editor
             LoopLabProjectBootstrap.RunBatchmode();
 
             Directory.CreateDirectory(outputDirectory);
+            var guidancePath = Path.Combine(outputDirectory, LoopLabBatchGraphicsGuard.GuidanceFileName);
+            if (File.Exists(guidancePath))
+            {
+                File.Delete(guidancePath);
+            }
+
+            LoopLabBatchGraphicsGuard.EnsureGraphicsBackedOutputWithGuidance(
+                "Loop boundary validation PNG capture",
+                outputDirectory,
+                "*.png");
 
             var failures = new List<string>();
             using var renderer = new LoopRenderer();

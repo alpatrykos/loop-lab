@@ -38,6 +38,8 @@ namespace Precondition.LoopLab.Editor.Export
 
         public static string ExportAll()
         {
+            LoopLabBatchGraphicsGuard.EnsureGraphicsBackedOutput("LoopLab showcase export");
+
             var outputDirectory = GetAbsoluteShowcaseDirectory();
             Directory.CreateDirectory(outputDirectory);
 
