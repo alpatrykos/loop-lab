@@ -137,7 +137,7 @@ namespace Precondition.LoopLab.Editor
 
             if (!hasGenerated)
             {
-                EditorGUILayout.HelpBox("Generate first to create a loop state for preview and export.", MessageType.Info);
+                EditorGUILayout.HelpBox("A test frame is rendered for the current settings. Generate to lock loop state for exports.", MessageType.Info);
             }
 
             if (hasPendingSettings)
@@ -156,10 +156,7 @@ namespace Precondition.LoopLab.Editor
 
         private void DrawPreview()
         {
-            var hasLoop = hasGenerated && !hasPendingSettings;
-            var previewTexture = hasLoop
-                ? RenderCurrentPreviewFrame()
-                : null;
+            var previewTexture = RenderCurrentPreviewFrame();
 
             var rect = GUILayoutUtility.GetAspectRect(1f, GUILayout.ExpandWidth(true));
 
@@ -276,13 +273,18 @@ namespace Precondition.LoopLab.Editor
                 return null;
             }
 
-            if (isPreviewing)
+            if (isPreviewing && hasGenerated && !hasPendingSettings)
             {
                 var elapsed = (float)(EditorApplication.timeSinceStartup - previewStartTime);
                 return renderer.RenderPreview(generatedSettings, elapsed);
             }
 
-            return renderer.Render(generatedSettings, 0);
+            if (hasGenerated && !hasPendingSettings)
+            {
+                return renderer.Render(generatedSettings, 0);
+            }
+
+            return renderer.Render(settings, 0);
         }
 
         private void LoadState()

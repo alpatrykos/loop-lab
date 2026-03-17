@@ -19,8 +19,10 @@ namespace Precondition.LoopLab
                 return Texture2D.grayTexture;
             }
 
-            var totalFrames = settings.FrameCount;
-            var clampedFrameIndex = Mathf.Clamp(frameIndex, 0, totalFrames - 1);
+            var totalFrames = Mathf.Max(1, settings.FrameCount);
+            var clampedFrameIndex = settings.FrameCount <= 1
+                ? 0
+                : ((frameIndex % totalFrames) + totalFrames) % totalFrames;
             var phase = LoopPhase.GetPhase(clampedFrameIndex, totalFrames);
             var loopVector = LoopPhase.GetLoopVector(phase);
 
@@ -32,15 +34,38 @@ namespace Precondition.LoopLab
             previewMaterial.SetColor("_AccentColor", LoopLabPresetCatalog.GetAccentColor(settings.Preset));
             previewMaterial.SetVector("_LoopVector", new Vector4(loopVector.x, loopVector.y, 0f, 0f));
 
-            Graphics.Blit(Texture2D.whiteTexture, previewTexture, previewMaterial);
+            RenderToOffscreenTexture();
             return previewTexture;
         }
 
         public Texture RenderPreview(LoopLabRenderSettings settings, float elapsedSeconds)
         {
             var totalFrames = settings.FrameCount;
-            var sampledFrame = Mathf.FloorToInt(Mathf.Max(0f, elapsedSeconds) * Mathf.Max(1, settings.FramesPerSecond));
+            if (totalFrames <= 1)
+            {
+                return Render(settings, 0);
+            }
+
+            var safeDuration = Mathf.Max(0.1f, settings.DurationSeconds);
+            var safeElapsed = Mathf.Max(0f, elapsedSeconds);
+            var normalizedPhase = LoopPhase.GetPhase(safeElapsed, safeDuration);
+            var sampledFrame = Mathf.FloorToInt(normalizedPhase * totalFrames) % totalFrames;
             return Render(settings, sampledFrame % totalFrames);
+        }
+
+        private void RenderToOffscreenTexture()
+        {
+            var previousTarget = RenderTexture.active;
+            try
+            {
+                RenderTexture.active = previewTexture;
+                GL.Clear(true, true, Color.clear);
+                Graphics.Blit(Texture2D.whiteTexture, previewTexture, previewMaterial, 0);
+            }
+            finally
+            {
+                RenderTexture.active = previousTarget;
+            }
         }
 
         public void Dispose()
