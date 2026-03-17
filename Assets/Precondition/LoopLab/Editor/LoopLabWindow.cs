@@ -324,14 +324,14 @@ namespace Precondition.LoopLab.Editor
             return true;
         }
 
-        private void ExportWith(Action<LoopLabRenderSettings, string> exporter, string formatLabel)
+        private void ExportWith(Func<LoopLabRenderSettings, string, string> exporter, string formatLabel)
         {
             try
             {
                 var outputDirectory = GetAbsoluteExportDirectory();
                 Directory.CreateDirectory(outputDirectory);
-                exporter(generatedSettings, outputDirectory);
-                statusMessage = $"{formatLabel} export requested to {outputDirectory}.";
+                var outputPath = exporter(generatedSettings, outputDirectory);
+                statusMessage = $"{formatLabel} exported to {outputPath}.";
             }
             catch (Exception exception)
             {
