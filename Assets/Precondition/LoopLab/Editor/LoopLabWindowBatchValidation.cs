@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using Precondition.LoopLab.Editor.Export;
@@ -71,34 +72,9 @@ namespace Precondition.LoopLab.Editor
                     throw new InvalidOperationException("Tiled preview render returned a null texture.");
                 }
 
-                Invoke(window, "SaveState");
-                AssertSavedPreviewMode("Tiled2x2");
-
-                var exportDirectory = GetAbsoluteExportDirectory();
-                var originalFfmpegOverride = Environment.GetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable);
-
-                try
-                {
-                    Environment.SetEnvironmentVariable(
-                        LoopLabFfmpegLocator.OverridePathEnvironmentVariable,
-                        Path.Combine(exportDirectory, "missing-ffmpeg"));
-                    Invoke(window, "ExportGif");
-                }
-                finally
-                {
-                    Environment.SetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable, originalFfmpegOverride);
-                }
-
-                var exportStatus = (string)GetField(window, "statusMessage");
-                if (!exportStatus.Contains("ffmpeg", StringComparison.OrdinalIgnoreCase) ||
-                    !exportStatus.Contains($"seed {firstGenerated.Seed}", StringComparison.Ordinal) ||
-                    !exportStatus.Contains($"{firstGenerated.FrameCount} frames @ {firstGenerated.FramesPerSecond} FPS", StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException($"Export failure did not preserve ffmpeg fallback context: {exportStatus}");
-                }
-
-                AssertNoTemporaryWorkspaces(exportDirectory);
-                AssertExportLifecycleCleanup(exportDirectory);
+                SetField(window, "savedPresetName", "Geometric Baseline");
+                Invoke(window, "SaveCurrentSettingsToPreset");
+                AssertSavedPresetCount(window, 1);
 
                 var livePreviewSettings = firstGenerated;
                 livePreviewSettings.DurationSeconds = 4f;
@@ -142,16 +118,76 @@ namespace Precondition.LoopLab.Editor
                 var randomizedBefore = GetField<LoopLabRenderSettings>(window, "settings");
                 Invoke(window, "RandomizeSeed");
                 var randomizedAfter = GetField<LoopLabRenderSettings>(window, "settings");
+                var randomizedStatus = (string)GetField(window, "statusMessage");
+                var expectedRandomizedSeed = LoopLabRenderSettings.RandomizeSeed(randomizedBefore.Seed);
 
-                if (randomizedAfter.Seed == randomizedBefore.Seed)
+                if (randomizedAfter.Seed != expectedRandomizedSeed)
                 {
-                    throw new InvalidOperationException("RandomizeSeed did not change the current seed.");
+                    throw new InvalidOperationException(
+                        $"RandomizeSeed expected {expectedRandomizedSeed} but produced {randomizedAfter.Seed}.");
+                }
+
+                if (!randomizedStatus.Contains(randomizedAfter.Seed.ToString(), StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"RandomizeSeed status did not expose the new seed: {randomizedStatus}");
                 }
 
                 if (randomizedAfter.Seed <= 0 || randomizedAfter.Seed > LoopLabRenderSettings.MaxSupportedSeedValue)
                 {
                     throw new InvalidOperationException($"Randomized seed was out of range: {randomizedAfter.Seed}.");
                 }
+
+                SetField(window, "savedPresetName", "Geometric Randomized");
+                Invoke(window, "SaveCurrentSettingsToPreset");
+                AssertSavedPresetCount(window, 2);
+
+                SetField(window, "settings", LoopLabRenderSettings.Default);
+                Invoke(window, "LoadSavedPreset", 1);
+
+                var restoredRandomizedSettings = (LoopLabRenderSettings)GetField(window, "settings");
+                if (!restoredRandomizedSettings.Equals(randomizedAfter))
+                {
+                    throw new InvalidOperationException("LoadSavedPreset did not restore the saved randomized settings.");
+                }
+
+                Invoke(window, "GenerateLoop");
+
+                var randomizedGeneratedSettings = (LoopLabRenderSettings)GetField(window, "generatedSettings");
+                if (!randomizedGeneratedSettings.Equals(randomizedAfter))
+                {
+                    throw new InvalidOperationException("GenerateLoop did not lock the randomized preset settings.");
+                }
+
+                SetField(window, "exportDirectoryPath", "Temp/LoopLabExports");
+                Invoke(window, "SaveState");
+                AssertSavedWorkspaceState("Tiled2x2", "Temp/LoopLabExports", 2, "Geometric Randomized");
+
+                var outputDirectory = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "Temp/LoopLabExports"));
+                var originalFfmpegOverride = Environment.GetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable);
+
+                try
+                {
+                    Environment.SetEnvironmentVariable(
+                        LoopLabFfmpegLocator.OverridePathEnvironmentVariable,
+                        Path.Combine(outputDirectory, "missing-ffmpeg"));
+                    Invoke(window, "ExportGif");
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable(LoopLabFfmpegLocator.OverridePathEnvironmentVariable, originalFfmpegOverride);
+                }
+
+                var exportStatus = (string)GetField(window, "statusMessage");
+                if (!exportStatus.Contains("ffmpeg", StringComparison.OrdinalIgnoreCase) ||
+                    !exportStatus.Contains($"seed {randomizedGeneratedSettings.Seed}", StringComparison.Ordinal) ||
+                    !exportStatus.Contains($"{randomizedGeneratedSettings.FrameCount} frames @ {randomizedGeneratedSettings.FramesPerSecond} FPS", StringComparison.Ordinal) ||
+                    !exportStatus.Contains(outputDirectory, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Export failure did not preserve ffmpeg fallback context: {exportStatus}");
+                }
+
+                AssertNoTemporaryWorkspaces(outputDirectory);
+                AssertExportLifecycleCleanup(outputDirectory);
 
                 Debug.Log("LoopLabWindow batch validation passed.");
             }
@@ -242,7 +278,11 @@ namespace Precondition.LoopLab.Editor
             }
         }
 
-        private static void AssertSavedPreviewMode(string expectedPreviewMode)
+        private static void AssertSavedWorkspaceState(
+            string expectedPreviewMode,
+            string expectedExportDirectoryPath,
+            int expectedSavedPresetCount,
+            string expectedSavedPresetName)
         {
             var restoredWindow = ScriptableObject.CreateInstance<LoopLabWindow>();
 
@@ -250,10 +290,35 @@ namespace Precondition.LoopLab.Editor
             {
                 Invoke(restoredWindow, "LoadState");
                 AssertPreviewMode(restoredWindow, expectedPreviewMode);
+
+                var restoredExportDirectoryPath = GetField<string>(restoredWindow, "exportDirectoryPath");
+                if (!string.Equals(restoredExportDirectoryPath, expectedExportDirectoryPath, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected export path {expectedExportDirectoryPath}, got {restoredExportDirectoryPath}.");
+                }
+
+                var restoredSavedPresetName = GetField<string>(restoredWindow, "savedPresetName");
+                if (!string.Equals(restoredSavedPresetName, expectedSavedPresetName, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected selected preset name {expectedSavedPresetName}, got {restoredSavedPresetName}.");
+                }
+
+                AssertSavedPresetCount(restoredWindow, expectedSavedPresetCount);
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(restoredWindow);
+            }
+        }
+
+        private static void AssertSavedPresetCount(object instance, int expectedCount)
+        {
+            var savedPresets = GetField<IList>(instance, "savedPresets");
+            if (savedPresets.Count != expectedCount)
+            {
+                throw new InvalidOperationException($"Expected {expectedCount} saved presets, got {savedPresets.Count}.");
             }
         }
 

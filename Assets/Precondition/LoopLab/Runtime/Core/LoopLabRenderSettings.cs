@@ -142,5 +142,30 @@ namespace Precondition.LoopLab
                 return (int)(hashedSeed % MaxSupportedSeedValue) + 1;
             }
         }
+
+        public static int RandomizeSeed(int seed)
+        {
+            var validatedSeed = ValidateSeed(seed);
+
+            unchecked
+            {
+                var randomizedSeed = (uint)validatedSeed;
+                randomizedSeed ^= 0x9e3779b9U;
+                randomizedSeed *= 0x85ebca6bU;
+                randomizedSeed ^= randomizedSeed >> 13;
+                randomizedSeed *= 0xc2b2ae35U;
+                randomizedSeed ^= randomizedSeed >> 16;
+
+                var nextSeed = (int)(randomizedSeed % MaxSupportedSeedValue) + 1;
+                if (nextSeed == validatedSeed)
+                {
+                    nextSeed = validatedSeed == MaxSupportedSeedValue
+                        ? 1
+                        : validatedSeed + 1;
+                }
+
+                return nextSeed;
+            }
+        }
     }
 }
