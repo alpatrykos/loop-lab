@@ -25,6 +25,7 @@ namespace Precondition.LoopLab.Editor
         private bool isPreviewing;
         private PreviewMode previewMode = PreviewMode.Single;
         private float previewElapsedSeconds;
+        private GifDitheringMode gifDithering = GifDitheringMode.None;
         private double previewStartTime;
         private string statusMessage = "Ready";
         private readonly List<SavedPresetState> savedPresets = new();
@@ -64,6 +65,7 @@ namespace Precondition.LoopLab.Editor
             public bool IsPreviewing;
             public PreviewMode PreviewMode = PreviewMode.Single;
             public float PreviewElapsedSeconds;
+            public GifDitheringMode GifDithering = GifDitheringMode.None;
             public double PreviewStartTime;
             public SavedPresetState[] SavedPresets = Array.Empty<SavedPresetState>();
             public int SelectedSavedPresetIndex = -1;
@@ -170,6 +172,18 @@ namespace Precondition.LoopLab.Editor
             if (previewMode == PreviewMode.Tiled2x2)
             {
                 EditorGUILayout.HelpBox("Tiled mode repeats the current frame in a 2x2 layout and highlights the seam boundaries.", MessageType.Info);
+            }
+
+            EditorGUI.BeginChangeCheck();
+            gifDithering = (GifDitheringMode)EditorGUILayout.EnumPopup("GIF Dithering", gifDithering);
+            if (EditorGUI.EndChangeCheck())
+            {
+                PersistState();
+            }
+
+            if (gifDithering == GifDitheringMode.FloydSteinberg)
+            {
+                EditorGUILayout.HelpBox("Floyd-Steinberg dithering improves gradients at the cost of extra grain and slightly larger files.", MessageType.Info);
             }
 
             GUILayout.Space(8f);
@@ -380,7 +394,15 @@ namespace Precondition.LoopLab.Editor
                 return;
             }
 
-            ExportWith(GifExporter.Export, "GIF");
+            ExportWith(
+                (exportSettings, outputDirectory) => GifExporter.Export(
+                    exportSettings,
+                    outputDirectory,
+                    new GifExportOptions
+                    {
+                        Dithering = gifDithering
+                    }),
+                "GIF");
         }
 
         private void ExportMp4()
@@ -390,7 +412,13 @@ namespace Precondition.LoopLab.Editor
                 return;
             }
 
-            ExportWith(Mp4Exporter.Export, "MP4");
+            ExportWith(
+                (exportSettings, outputDirectory) =>
+                {
+                    Mp4Exporter.Export(exportSettings, outputDirectory);
+                    return string.Empty;
+                },
+                "MP4");
         }
 
         private bool EnsureReadyForExport(string formatLabel)
@@ -430,8 +458,10 @@ namespace Precondition.LoopLab.Editor
             try
             {
                 Directory.CreateDirectory(outputDirectory);
-                var outputPath = exporter(generatedSettings, outputDirectory);
-                statusMessage = $"{formatLabel} export completed for {exportSummary} -> {outputPath}.";
+                var exportedPath = exporter(generatedSettings, outputDirectory);
+                statusMessage = string.IsNullOrEmpty(exportedPath)
+                    ? $"{formatLabel} export completed for {exportSummary} -> {outputDirectory}."
+                    : $"{formatLabel} export wrote {exportedPath}.";
             }
             catch (Exception exception)
             {
@@ -668,6 +698,7 @@ namespace Precondition.LoopLab.Editor
             generatedSettings = restoredState.GeneratedSettings.GetValidated();
             hasGenerated = restoredState.HasGenerated;
             previewMode = restoredState.PreviewMode;
+            gifDithering = restoredState.GifDithering;
             savedPresets.Clear();
             if (restoredState.SavedPresets != null)
             {
@@ -723,6 +754,7 @@ namespace Precondition.LoopLab.Editor
                 IsPreviewing = isPreviewing,
                 PreviewMode = previewMode,
                 PreviewElapsedSeconds = GetCurrentPreviewElapsedSeconds(),
+                GifDithering = gifDithering,
                 PreviewStartTime = previewStartTime,
                 SavedPresets = GetSavedPresetStateSnapshot(),
                 SelectedSavedPresetIndex = selectedSavedPresetIndex,
@@ -1118,6 +1150,7 @@ namespace Precondition.LoopLab.Editor
             isPreviewing = false;
             previewMode = PreviewMode.Single;
             previewElapsedSeconds = 0f;
+            gifDithering = GifDitheringMode.None;
             previewStartTime = 0d;
             savedPresets.Clear();
             selectedSavedPresetIndex = -1;

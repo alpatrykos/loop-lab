@@ -1,9 +1,8 @@
 {
-  "name": "Precondition.LoopLab.Tests.EditMode",
-  "rootNamespace": "Precondition.LoopLab.Tests",
+  "name": "Precondition.LoopLab.Editor.Export",
+  "rootNamespace": "Precondition.LoopLab.Editor.Export",
   "references": [
-    "Precondition.LoopLab.Runtime",
-    "Precondition.LoopLab.Editor.Export"
+    "Precondition.LoopLab.Runtime"
   ],
   "includePlatforms": [
     "Editor"
@@ -12,11 +11,8 @@
   "allowUnsafeCode": false,
   "overrideReferences": false,
   "precompiledReferences": [],
-  "autoReferenced": false,
+  "autoReferenced": true,
   "defineConstraints": [],
   "versionDefines": [],
-  "optionalUnityReferences": [
-    "TestAssemblies"
-  ],
   "noEngineReferences": false
 }
