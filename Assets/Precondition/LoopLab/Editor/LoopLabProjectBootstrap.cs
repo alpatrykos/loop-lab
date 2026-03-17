@@ -188,7 +188,7 @@ namespace Precondition.LoopLab.Editor
         private static PostProcessData LoadDefaultPostProcessData()
         {
             var postProcessData = AssetDatabase.LoadAssetAtPath<PostProcessData>(
-                Path.Combine(UniversalRenderPipelineAsset.packagePath, "Runtime/Data/PostProcessData.asset"));
+                UniversalRenderPipelineAsset.packagePath + "/Runtime/Data/PostProcessData.asset");
 
             if (postProcessData == null)
             {

@@ -20,10 +20,12 @@ namespace Precondition.LoopLab.Editor
         private void OnEnable()
         {
             renderer ??= new LoopRenderer();
+            EditorApplication.update += HandleEditorUpdate;
         }
 
         private void OnDisable()
         {
+            EditorApplication.update -= HandleEditorUpdate;
             renderer?.Dispose();
             renderer = null;
         }
@@ -88,7 +90,7 @@ namespace Precondition.LoopLab.Editor
 
         private void DrawPreview()
         {
-            var texture = renderer?.Render(settings);
+            var texture = renderer?.RenderPreview(settings, (float)EditorApplication.timeSinceStartup);
             var rect = GUILayoutUtility.GetAspectRect(1f, GUILayout.ExpandWidth(true));
 
             EditorGUI.DrawRect(rect, new Color(0.09f, 0.1f, 0.12f));
@@ -102,7 +104,17 @@ namespace Precondition.LoopLab.Editor
         private void GeneratePreview()
         {
             renderer ??= new LoopRenderer();
-            renderer.Render(settings);
+            renderer.RenderPreview(settings, (float)EditorApplication.timeSinceStartup);
+            Repaint();
+        }
+
+        private void HandleEditorUpdate()
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
             Repaint();
         }
     }

@@ -9,7 +9,7 @@ namespace Precondition.LoopLab
         private Material previewMaterial;
         private RenderTexture previewTexture;
 
-        public Texture Render(LoopLabRenderSettings settings)
+        public Texture Render(LoopLabRenderSettings settings, int frameIndex)
         {
             EnsurePreviewTexture(settings.ClampedResolution);
             EnsurePreviewMaterial(settings.Preset);
@@ -19,7 +19,9 @@ namespace Precondition.LoopLab
                 return Texture2D.grayTexture;
             }
 
-            var phase = LoopPhase.GetPhase(settings.FrameCount / 4, settings.FrameCount);
+            var totalFrames = settings.FrameCount;
+            var clampedFrameIndex = Mathf.Clamp(frameIndex, 0, totalFrames - 1);
+            var phase = LoopPhase.GetPhase(clampedFrameIndex, totalFrames);
             var loopVector = LoopPhase.GetLoopVector(phase);
 
             previewMaterial.SetFloat("_Seed", settings.Seed);
@@ -32,6 +34,13 @@ namespace Precondition.LoopLab
 
             Graphics.Blit(Texture2D.whiteTexture, previewTexture, previewMaterial);
             return previewTexture;
+        }
+
+        public Texture RenderPreview(LoopLabRenderSettings settings, float elapsedSeconds)
+        {
+            var totalFrames = settings.FrameCount;
+            var sampledFrame = Mathf.FloorToInt(Mathf.Max(0f, elapsedSeconds) * Mathf.Max(1, settings.FramesPerSecond));
+            return Render(settings, sampledFrame % totalFrames);
         }
 
         public void Dispose()
