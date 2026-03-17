@@ -58,7 +58,8 @@ Shader "LoopLab/Landscape"
             half4 Frag(Varyings input) : SV_Target
             {
                 const float fullTurn = 6.28318530718;
-                float ridge = sin((input.uv.x + _LoopVector.x * 0.12 + _Phase * 0.5) * _GridScale * fullTurn);
+                float ridgeOffset = _LoopVector.x * 0.12 + _LoopVector.y * 0.08;
+                float ridge = sin((input.uv.x + ridgeOffset) * _GridScale * fullTurn);
                 float horizon = smoothstep(0.08, 0.9, input.uv.y + _LoopVector.y * 0.04);
                 float fog = smoothstep(0.0, 0.75, input.uv.y);
                 float grain = frac((input.uv.x + input.uv.y + _Seed * 0.001) * 31.0);

@@ -11,6 +11,16 @@ namespace Precondition.LoopLab
 
         public Texture Render(LoopLabRenderSettings settings, int frameIndex)
         {
+            var totalFrames = Mathf.Max(1, settings.FrameCount);
+            var clampedFrameIndex = settings.FrameCount <= 1
+                ? 0
+                : ((frameIndex % totalFrames) + totalFrames) % totalFrames;
+            var phase = LoopPhase.GetPhase(clampedFrameIndex, totalFrames);
+            return RenderAtPhase(settings, phase);
+        }
+
+        public Texture RenderAtPhase(LoopLabRenderSettings settings, float phase)
+        {
             EnsurePreviewTexture(settings.ClampedResolution);
             EnsurePreviewMaterial(settings.Preset);
 
@@ -19,11 +29,6 @@ namespace Precondition.LoopLab
                 return Texture2D.grayTexture;
             }
 
-            var totalFrames = Mathf.Max(1, settings.FrameCount);
-            var clampedFrameIndex = settings.FrameCount <= 1
-                ? 0
-                : ((frameIndex % totalFrames) + totalFrames) % totalFrames;
-            var phase = LoopPhase.GetPhase(clampedFrameIndex, totalFrames);
             var loopVector = LoopPhase.GetLoopVector(phase);
 
             previewMaterial.SetFloat("_Seed", settings.Seed);
