@@ -95,7 +95,12 @@ namespace Precondition.LoopLab.Editor
             {
                 rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
                 ResourceReloader.ReloadAllNullIn(rendererData, UniversalRenderPipelineAsset.packagePath);
+                rendererData.postProcessData = LoadDefaultPostProcessData();
                 AssetDatabase.CreateAsset(rendererData, RendererAssetPath);
+            }
+            else if (rendererData.postProcessData == null)
+            {
+                rendererData.postProcessData = LoadDefaultPostProcessData();
             }
 
             var pipelineAsset = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(PipelineAssetPath);
@@ -146,7 +151,7 @@ namespace Precondition.LoopLab.Editor
         {
             if (AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath) != null)
             {
-                EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+                EnsureSceneInBuildSettings();
                 return;
             }
 
@@ -177,7 +182,40 @@ namespace Precondition.LoopLab.Editor
             light.color = new Color(1f, 0.95f, 0.88f);
 
             EditorSceneManager.SaveScene(scene, ScenePath);
-            EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
+            EnsureSceneInBuildSettings();
+        }
+
+        private static PostProcessData LoadDefaultPostProcessData()
+        {
+            var postProcessData = AssetDatabase.LoadAssetAtPath<PostProcessData>(
+                Path.Combine(UniversalRenderPipelineAsset.packagePath, "Runtime/Data/PostProcessData.asset"));
+
+            if (postProcessData == null)
+            {
+                throw new InvalidOperationException("Missing default URP post-process data asset.");
+            }
+
+            return postProcessData;
+        }
+
+        private static void EnsureSceneInBuildSettings()
+        {
+            var scenes = EditorBuildSettings.scenes;
+            for (var index = 0; index < scenes.Length; index++)
+            {
+                if (scenes[index].path != ScenePath)
+                {
+                    continue;
+                }
+
+                scenes[index] = new EditorBuildSettingsScene(ScenePath, true);
+                EditorBuildSettings.scenes = scenes;
+                return;
+            }
+
+            Array.Resize(ref scenes, scenes.Length + 1);
+            scenes[^1] = new EditorBuildSettingsScene(ScenePath, true);
+            EditorBuildSettings.scenes = scenes;
         }
 
         private static string ToAbsoluteProjectPath(string projectRelativePath)
