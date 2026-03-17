@@ -52,6 +52,17 @@ namespace Precondition.LoopLab.Tests
         }
 
         [Test]
+        public void NormalizePreviewElapsedSeconds_WrapsWithinSingleLoopDuration()
+        {
+            Assert.That(LoopLabRenderSettings.NormalizePreviewElapsedSeconds(0f, 3f), Is.EqualTo(0f));
+            Assert.That(LoopLabRenderSettings.NormalizePreviewElapsedSeconds(3f, 3f), Is.EqualTo(0f));
+            Assert.That(LoopLabRenderSettings.NormalizePreviewElapsedSeconds(3.25f, 3f), Is.EqualTo(0.25f).Within(0.0001f));
+            Assert.That(
+                LoopLabRenderSettings.NormalizePreviewElapsedSeconds(float.NaN, 3f),
+                Is.EqualTo(0f));
+        }
+
+        [Test]
         public void NormalizeFrameIndex_WrapsNegativeAndOverflowFrameNumbers()
         {
             Assert.That(LoopLabRenderSettings.NormalizeFrameIndex(0, 24), Is.EqualTo(0));

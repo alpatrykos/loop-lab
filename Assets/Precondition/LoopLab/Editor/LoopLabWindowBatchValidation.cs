@@ -64,6 +64,59 @@ namespace Precondition.LoopLab.Editor
                     throw new InvalidOperationException($"Export failure did not preserve normalized settings context: {exportStatus}");
                 }
 
+                var livePreviewSettings = firstGenerated;
+                livePreviewSettings.DurationSeconds = 4f;
+                livePreviewSettings.Resolution = 256;
+                livePreviewSettings.Seed = firstGenerated.Seed + 17;
+
+                SetField(window, "settings", livePreviewSettings);
+                Invoke(window, "HandleSettingsChanged", "Settings updated.");
+
+                if (!GetField<bool>(window, "isPreviewing"))
+                {
+                    throw new InvalidOperationException("Preview unexpectedly stopped after settings changed.");
+                }
+
+                if (!GetField<bool>(window, "hasPendingSettings"))
+                {
+                    throw new InvalidOperationException("Live preview settings were not marked pending after editing.");
+                }
+
+                var livePreviewStatus = GetField<string>(window, "statusMessage");
+                if (!livePreviewStatus.Contains("Preview reflects live settings. Generate to refresh exports.", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Unexpected live preview status: {livePreviewStatus}");
+                }
+
+                var livePreviewTexture = (Texture)Invoke(window, "RenderCurrentPreviewFrame");
+                if (livePreviewTexture is not RenderTexture livePreviewRenderTexture ||
+                    livePreviewRenderTexture.width != livePreviewSettings.ClampedResolution)
+                {
+                    throw new InvalidOperationException("Live preview did not refresh to the updated resolution.");
+                }
+
+                Invoke(window, "ScrubPreview", 1.5f);
+
+                var previewElapsed = GetField<float>(window, "previewElapsedSeconds");
+                if (!Mathf.Approximately(previewElapsed, 1.5f))
+                {
+                    throw new InvalidOperationException($"Expected scrubbed preview time 1.5s, got {previewElapsed:0.000}.");
+                }
+
+                var randomizedBefore = GetField<LoopLabRenderSettings>(window, "settings");
+                Invoke(window, "RandomizeSeed");
+                var randomizedAfter = GetField<LoopLabRenderSettings>(window, "settings");
+
+                if (randomizedAfter.Seed == randomizedBefore.Seed)
+                {
+                    throw new InvalidOperationException("RandomizeSeed did not change the current seed.");
+                }
+
+                if (randomizedAfter.Seed <= 0 || randomizedAfter.Seed > LoopLabRenderSettings.MaxSupportedSeedValue)
+                {
+                    throw new InvalidOperationException($"Randomized seed was out of range: {randomizedAfter.Seed}.");
+                }
+
                 Debug.Log("LoopLabWindow batch validation passed.");
             }
             finally
@@ -116,6 +169,11 @@ namespace Precondition.LoopLab.Editor
             return field.GetValue(instance);
         }
 
+        private static T GetField<T>(object instance, string fieldName)
+        {
+            return (T)GetField(instance, fieldName);
+        }
+
         private static void SetField(object instance, string fieldName, object value)
         {
             var field = instance.GetType().GetField(fieldName, InstanceFlags);
@@ -127,15 +185,16 @@ namespace Precondition.LoopLab.Editor
             field.SetValue(instance, value);
         }
 
-        private static object Invoke(object instance, string methodName)
+        private static object Invoke(object instance, string methodName, params object[] args)
         {
-            var method = instance.GetType().GetMethod(methodName, InstanceFlags);
+            var argumentTypes = Array.ConvertAll(args, argument => argument.GetType());
+            var method = instance.GetType().GetMethod(methodName, InstanceFlags, null, argumentTypes, null);
             if (method == null)
             {
                 throw new MissingMethodException(instance.GetType().FullName, methodName);
             }
 
-            return method.Invoke(instance, null);
+            return method.Invoke(instance, args);
         }
     }
 }

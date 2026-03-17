@@ -74,8 +74,15 @@ namespace Precondition.LoopLab
                 return 0;
             }
 
-            var normalizedPhase = LoopPhase.GetPhase(ValidateElapsedSeconds(elapsedSeconds), ValidateDurationSeconds(durationSeconds));
+            var normalizedPhase = LoopPhase.GetPhase(
+                NormalizePreviewElapsedSeconds(elapsedSeconds, durationSeconds),
+                ValidateDurationSeconds(durationSeconds));
             return Mathf.FloorToInt(normalizedPhase * safeFrameCount) % safeFrameCount;
+        }
+
+        public static float NormalizePreviewElapsedSeconds(float elapsedSeconds, float durationSeconds)
+        {
+            return Mathf.Repeat(ValidateElapsedSeconds(elapsedSeconds), ValidateDurationSeconds(durationSeconds));
         }
 
         public static int ValidateFramesPerSecond(int framesPerSecond)
