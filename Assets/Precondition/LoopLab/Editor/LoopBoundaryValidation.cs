@@ -181,6 +181,13 @@ namespace Precondition.LoopLab.Editor
 
     public static class LoopBoundaryValidationBatch
     {
+        private static readonly int[] ValidationSeeds =
+        {
+            LoopLabRenderSettings.DefaultSeedValue,
+            271828,
+            314159
+        };
+
         public static void RunAllPresets()
         {
             RunAllPresets(LoopBoundaryValidator.GetDefaultOutputDirectory());
@@ -223,27 +230,31 @@ namespace Precondition.LoopLab.Editor
             {
                 foreach (var contrastMode in GetContrastModes(preset))
                 {
-                    var settings = LoopLabRenderSettings.Default;
-                    settings.Preset = preset;
-                    settings.ContrastMode = contrastMode;
-
-                    using var result = LoopBoundaryValidator.Capture(renderer, settings);
-                    var filePrefix = preset.ToString().ToLowerInvariant();
-                    var variantLabel = preset.ToString();
-                    if (LoopLabPresetCatalog.SupportsContrastMode(preset))
+                    foreach (var seed in ValidationSeeds)
                     {
-                        filePrefix += "-" + contrastMode.ToString().ToLowerInvariant();
-                        variantLabel += $" ({contrastMode})";
-                    }
+                        var settings = LoopLabRenderSettings.Default;
+                        settings.Preset = preset;
+                        settings.ContrastMode = contrastMode;
+                        settings.Seed = seed;
 
-                    result.WriteImages(outputDirectory, filePrefix);
+                        using var result = LoopBoundaryValidator.Capture(renderer, settings);
+                        var filePrefix = $"{preset.ToString().ToLowerInvariant()}-seed{seed}";
+                        var variantLabel = $"{preset} seed {seed}";
+                        if (LoopLabPresetCatalog.SupportsContrastMode(preset))
+                        {
+                            filePrefix += "-" + contrastMode.ToString().ToLowerInvariant();
+                            variantLabel += $" ({contrastMode})";
+                        }
 
-                    Debug.Log(
-                        $"[LoopBoundaryValidation] {variantLabel}: compared frame 0 vs frame {result.ComparedFrameIndex}, avg delta {(result.AverageDelta * 100f):0.00}%, max delta {(result.MaxDelta * 100f):0.00}%.");
+                        result.WriteImages(outputDirectory, filePrefix);
 
-                    if (!result.MatchesVisually)
-                    {
-                        failures.Add($"{variantLabel} (avg {(result.AverageDelta * 100f):0.00}%, max {(result.MaxDelta * 100f):0.00}%)");
+                        Debug.Log(
+                            $"[LoopBoundaryValidation] {variantLabel}: compared frame 0 vs frame {result.ComparedFrameIndex}, avg delta {(result.AverageDelta * 100f):0.00}%, max delta {(result.MaxDelta * 100f):0.00}%.");
+
+                        if (!result.MatchesVisually)
+                        {
+                            failures.Add($"{variantLabel} (avg {(result.AverageDelta * 100f):0.00}%, max {(result.MaxDelta * 100f):0.00}%)");
+                        }
                     }
                 }
             }

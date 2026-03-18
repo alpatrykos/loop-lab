@@ -48,13 +48,11 @@ namespace Precondition.LoopLab
         public Texture RenderPreview(LoopLabRenderSettings settings, float elapsedSeconds)
         {
             var validatedSettings = settings.GetValidated();
-            var totalFrames = validatedSettings.FrameCount;
-            var sampledFrame = LoopLabRenderSettings.GetPreviewFrameIndex(
+            var normalizedElapsedSeconds = LoopLabRenderSettings.NormalizePreviewElapsedSeconds(
                 elapsedSeconds,
-                validatedSettings.DurationSeconds,
-                totalFrames);
-
-            return Render(validatedSettings, sampledFrame);
+                validatedSettings.DurationSeconds);
+            var phase = LoopPhase.GetPhase(normalizedElapsedSeconds, validatedSettings.DurationSeconds);
+            return RenderAtPhase(validatedSettings, phase);
         }
 
         private void RenderToOffscreenTexture()

@@ -24,6 +24,7 @@ Shader "LoopLab/Geometric"
             #pragma fragment Frag
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Precondition/LoopLab/Runtime/Shaders/LoopLabLooping.hlsl"
 
             struct Attributes
             {
@@ -123,19 +124,17 @@ Shader "LoopLab/Geometric"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                const float fullTurn = 6.28318530718;
                 const float sqrt3 = 1.73205080757;
 
                 float2 uv = GetInclusiveUv(input.uv);
-                float theta = _Phase * fullTurn;
+                float phase = LoopLabPhase01(_Phase);
+                float theta = LoopLabTheta(phase);
                 float columns = max(4.0, floor(_GridScale + 0.5));
                 float rows = max(3.0, floor(columns * 0.625 + 0.5));
                 float2 tileExtent = float2(columns, rows * sqrt3);
 
                 float2 domain = float2(uv.x * columns, uv.y * rows * sqrt3);
-                domain += float2(
-                    _LoopVector.x * 0.18 + _LoopVector.y * 0.06,
-                    _LoopVector.y * 0.14);
+                domain = LoopLabApplyOrbit(domain, _LoopVector.xy, float2(0.18, 0.0), float2(0.06, 0.14));
                 float2 periodicDomain = WrapPeriodic(domain, tileExtent);
                 float2 tileUv = periodicDomain / tileExtent;
 
@@ -145,7 +144,7 @@ Shader "LoopLab/Geometric"
                 float2 periodicCellCenter = WrapPeriodic(cellCenter, tileExtent);
                 float cellHash = Hash21(periodicCellCenter + seedOffset);
                 float spinDirection = cellHash >= 0.5 ? 1.0 : -1.0;
-                float seedPhase = cellHash * fullTurn;
+                float seedPhase = cellHash * LoopLabFullTurn;
 
                 float scalePulse = 1.0 + 0.10 * sin(theta + seedPhase * 0.8);
                 float2 orbit = 0.08 * float2(
@@ -172,7 +171,7 @@ Shader "LoopLab/Geometric"
                 float radialPattern = 0.5 + 0.5 * cos(localRadius * 14.0 - theta * 1.4 + seedPhase * 1.6);
                 float detailBlend = saturate(spokePattern * 0.65 + radialPattern * 0.35);
 
-                float bandPattern = 0.5 + 0.5 * cos((tileUv.y * 3.0 - tileUv.x * 2.0) * fullTurn + theta * 0.6);
+                float bandPattern = 0.5 + 0.5 * cos((tileUv.y * 3.0 - tileUv.x * 2.0) * LoopLabFullTurn + theta * 0.6);
 
                 float3 shadowColor = _BaseColor.rgb * 0.82;
                 float3 midColor = lerp(_BaseColor.rgb, _AccentColor.rgb, 0.24);

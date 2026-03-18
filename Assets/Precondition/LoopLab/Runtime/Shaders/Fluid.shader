@@ -24,6 +24,7 @@ Shader "LoopLab/Fluid"
             #pragma fragment Frag
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Precondition/LoopLab/Runtime/Shaders/LoopLabLooping.hlsl"
 
             struct Attributes
             {
@@ -55,92 +56,119 @@ Shader "LoopLab/Fluid"
                 return output;
             }
 
-            float2 Rotate(float2 value, float angle)
+            float TileBand(float2 centeredUv, float2 primaryFrequency, float2 secondaryFrequency)
             {
-                float sine;
-                float cosine;
-                sincos(angle, sine, cosine);
-                return float2(
-                    cosine * value.x - sine * value.y,
-                    sine * value.x + cosine * value.y);
+                float primary =
+                    cos(centeredUv.x * LoopLabFullTurn * primaryFrequency.x) *
+                    cos(centeredUv.y * LoopLabFullTurn * primaryFrequency.y);
+                float secondary =
+                    cos(centeredUv.x * LoopLabFullTurn * secondaryFrequency.x) *
+                    cos(centeredUv.y * LoopLabFullTurn * secondaryFrequency.y);
+                return primary * 0.58 + secondary * 0.42;
             }
 
-            float FlowPotential(float2 position, float2 loopVector, float seedOffset)
+            float TileField(float2 centeredUv, float phase, float seed)
             {
-                float2 primaryPosition = position * (_GridScale * 0.82);
-                float primary = sin(dot(primaryPosition, float2(1.34, -1.57)) + loopVector.x * 1.9 + loopVector.y * 1.3 + seedOffset);
-
-                float2 secondaryPosition = Rotate(position, 0.82 + seedOffset * 0.09) * (_GridScale * 1.12);
-                float secondary = cos(dot(secondaryPosition, float2(-0.91, 1.62)) - loopVector.y * 2.15 + loopVector.x * 0.95 + seedOffset * 1.7);
-
-                float2 tertiaryPosition = Rotate(position, -1.17) * (_GridScale * 0.62);
-                float tertiary = sin(tertiaryPosition.x * 1.76 - tertiaryPosition.y * 1.21 + (loopVector.x - loopVector.y) * 2.4 + seedOffset * 0.63);
-
-                return primary * 0.52 + secondary * 0.31 + tertiary * 0.17;
+                float seedBias = frac(seed * 0.017);
+                float octaveA = lerp(
+                    TileBand(centeredUv, float2(1.0, 2.0), float2(2.0, 1.0)),
+                    TileBand(centeredUv, float2(1.0, 3.0), float2(2.0, 2.0)),
+                    LoopLabBlendWeight(phase, 1.0, 0.11 + seedBias * 0.31));
+                float octaveB = lerp(
+                    TileBand(centeredUv, float2(2.0, 3.0), float2(3.0, 2.0)),
+                    TileBand(centeredUv, float2(3.0, 3.0), float2(4.0, 2.0)),
+                    LoopLabBlendWeight(phase, 2.0, 0.23 + seedBias * 0.23));
+                float octaveC = lerp(
+                    TileBand(centeredUv, float2(4.0, 3.0), float2(3.0, 5.0)),
+                    TileBand(centeredUv, float2(5.0, 4.0), float2(4.0, 6.0)),
+                    LoopLabBlendWeight(phase, 3.0, 0.37 + seedBias * 0.17));
+                float octaveD = lerp(
+                    TileBand(centeredUv, float2(6.0, 5.0), float2(5.0, 7.0)),
+                    TileBand(centeredUv, float2(7.0, 6.0), float2(8.0, 8.0)),
+                    LoopLabBlendWeight(phase, 4.0, 0.49 + seedBias * 0.13));
+                return octaveA * 0.36 + octaveB * 0.28 + octaveC * 0.21 + octaveD * 0.15;
             }
 
-            float2 CurlLikeFlow(float2 position, float2 loopVector, float seedOffset)
+            float FlowPotential(float2 centeredUv, float phase, float seed)
             {
-                const float derivativeStep = 0.12;
-                float potentialUp = FlowPotential(position + float2(0.0, derivativeStep), loopVector, seedOffset);
-                float potentialDown = FlowPotential(position - float2(0.0, derivativeStep), loopVector, seedOffset);
-                float potentialRight = FlowPotential(position + float2(derivativeStep, 0.0), loopVector, seedOffset);
-                float potentialLeft = FlowPotential(position - float2(derivativeStep, 0.0), loopVector, seedOffset);
+                float primary = TileField(centeredUv, phase, seed);
+                float secondary = TileField(centeredUv, frac(phase * 2.0 + 0.19), seed + 17.0);
+                float tertiary = TileField(centeredUv, frac(phase * 3.0 + 0.37), seed + 41.0);
+                return primary * 0.56 + secondary * 0.29 + tertiary * 0.15;
+            }
+
+            float2 CurlLikeFlow(float2 centeredUv, float phase, float seed)
+            {
+                const float derivativeStep = 0.01;
+                float potentialUp = FlowPotential(centeredUv + float2(0.0, derivativeStep), phase, seed);
+                float potentialDown = FlowPotential(centeredUv - float2(0.0, derivativeStep), phase, seed);
+                float potentialRight = FlowPotential(centeredUv + float2(derivativeStep, 0.0), phase, seed);
+                float potentialLeft = FlowPotential(centeredUv - float2(derivativeStep, 0.0), phase, seed);
 
                 float derivativeY = (potentialUp - potentialDown) / (2.0 * derivativeStep);
                 float derivativeX = (potentialRight - potentialLeft) / (2.0 * derivativeStep);
                 return float2(derivativeY, -derivativeX);
             }
 
-            float FluidDensity(float2 position, float2 loopVector, float seedOffset)
+            float FluidDensity(float2 centeredUv, float phase, float seed)
             {
-                float bandA = sin(dot(position, float2(1.48, -1.18)) * _GridScale + FlowPotential(position * 0.74, loopVector, seedOffset) * 1.42 + loopVector.x * 1.45);
-                float bandB = cos(dot(Rotate(position, 1.08), float2(1.0, 1.58)) * (_GridScale * 0.62) - FlowPotential(position * 1.04, loopVector, seedOffset + 1.9) * 1.08 + loopVector.y * 1.24);
-                float bandC = sin((position.x + position.y * 0.7) * (_GridScale * 0.86) + (loopVector.x + loopVector.y) * 1.1 + seedOffset * 1.3);
-                return bandA * 0.56 + bandB * 0.28 + bandC * 0.16;
+                float body = TileField(centeredUv, phase, seed);
+                float contour = TileField(centeredUv, frac(phase * 2.0 + 0.17), seed + 67.0);
+                float ribbon = TileBand(centeredUv, float2(6.0, 2.0), float2(5.0, 3.0));
+                float eddy = TileBand(centeredUv, float2(2.0, 6.0), float2(3.0, 5.0));
+                return body * 0.44 + contour * 0.28 + ribbon * 0.18 + eddy * 0.10;
+            }
+
+            float FluidRidge(float2 centeredUv, float phase, float seed)
+            {
+                float primary = 1.0 - abs(TileField(centeredUv, phase, seed) * 2.0 - 1.0);
+                float secondary = 1.0 - abs(TileField(centeredUv, frac(phase * 2.0 + 0.29), seed + 97.0) * 2.0 - 1.0);
+                return saturate(primary * primary * 0.62 + secondary * secondary * 0.38);
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
-                const float fullTurn = 6.28318530718;
-                float seedOffset = _Seed * 0.00091;
-                float phaseAngle = _Phase * fullTurn;
+                float phase = LoopLabPhase01(_Phase);
                 float2 loopVector = _LoopVector.xy;
-                float2 centered = input.uv * 2.0 - 1.0;
-                centered.x *= 0.98;
-
+                float seed = _Seed * 0.071;
                 float durationBlend = saturate((_Duration - 1.8) * 0.45);
-                float2 domain = Rotate(centered, loopVector.x * 0.24 + seedOffset * 0.35);
-                float2 primaryFlow = CurlLikeFlow(domain, loopVector, seedOffset);
-                float2 advected = domain + primaryFlow * lerp(0.10, 0.15, durationBlend);
+                float2 centered = input.uv - 0.5;
 
-                float2 rotatedLoop = float2(-loopVector.y, loopVector.x);
-                float2 secondaryFlow = CurlLikeFlow(advected * 1.31 + float2(0.18, -0.07), rotatedLoop, seedOffset + 2.7);
-                advected += secondaryFlow * lerp(0.04, 0.07, durationBlend);
+                float2 primaryDomain = LoopLabApplyOrbit(centered, loopVector, float2(0.048, -0.027), float2(-0.019, 0.035));
+                float2 detailDomain = LoopLabApplyOrbit(centered, loopVector, float2(-0.024, 0.018), float2(0.029, 0.021));
+                float2 shadowDomain = LoopLabApplyOrbit(centered, loopVector, float2(0.012, -0.008), float2(0.007, 0.014));
 
-                float2 tertiaryFlow = CurlLikeFlow(advected * 1.72 - primaryFlow * 0.26, float2(loopVector.y, -loopVector.x), seedOffset + 5.1);
-                advected += tertiaryFlow * 0.026;
+                float2 primaryFlow = CurlLikeFlow(primaryDomain, frac(phase * 1.0 + 0.07), seed + 13.0);
+                float2 secondaryFlow = CurlLikeFlow(detailDomain + primaryFlow * 0.18, frac(phase * 2.0 + 0.23), seed + 31.0);
+                float2 tertiaryFlow = CurlLikeFlow(primaryDomain - detailDomain * 0.22, frac(phase * 3.0 + 0.41), seed + 59.0);
 
-                float flowMagnitude = saturate(length(primaryFlow) * 0.34 + length(secondaryFlow) * 0.26 + length(tertiaryFlow) * 0.2);
-                float density = FluidDensity(advected, loopVector, seedOffset);
-                float body = smoothstep(-0.32, 0.78, density + flowMagnitude * 0.42);
+                float flowMagnitude = saturate(length(primaryFlow) * 0.34 + length(secondaryFlow) * 0.24 + length(tertiaryFlow) * 0.16);
+                float swirlMask = saturate(abs(primaryFlow.x) * 0.28 + abs(secondaryFlow.y) * 0.24 + abs(tertiaryFlow.x * tertiaryFlow.y) * 0.18);
+                float density = FluidDensity(primaryDomain + secondaryFlow * lerp(0.03, 0.05, durationBlend), phase, seed);
+                float interiorField = FluidDensity(detailDomain - primaryFlow * 0.04, frac(phase * 2.0 + 0.27), seed + 83.0);
+                float highlightField = FluidRidge(primaryDomain + tertiaryFlow * 0.05, frac(phase * 4.0 + 0.49), seed + 109.0);
+                float shadowField = TileField(shadowDomain, frac(phase * 0.5 + 0.61), seed + 139.0);
 
-                float highlightField = FluidDensity(advected * 1.48 - secondaryFlow * 0.3 + float2(0.06, -0.04), rotatedLoop, seedOffset + 7.4);
-                float highlight = smoothstep(0.24, 0.86, body * 0.54 + flowMagnitude * 0.7 + highlightField * 0.28);
+                float body = smoothstep(-0.25, 0.72, density + interiorField * 0.24 + flowMagnitude * 0.22);
+                float highlight = smoothstep(0.16, 0.94, highlightField * 0.58 + body * 0.22 + flowMagnitude * 0.24);
+                float interiorBlend = smoothstep(-0.78, 0.68, density * 0.58 + interiorField * 0.42);
+                float depth = smoothstep(-0.74, 0.52, density * 0.46 - shadowField * 0.24 + swirlMask * 0.22);
+                float phaseLift = 0.5 + 0.5 * LoopLabSinWave(phase, 2.0, density * 0.35 + interiorField * 0.27);
+                float filament = smoothstep(0.18, 0.82, highlightField * 0.54 + abs(density - interiorField) * 0.26 + swirlMask * 0.12);
 
-                float interiorBlend = smoothstep(-0.85, 0.62, density - flowMagnitude * 0.28);
-                float radius = length(centered);
-                float radialFocus = smoothstep(1.08, 0.12, radius);
-                float depth = smoothstep(1.18, 0.04, radius + density * 0.1);
-                float phaseLift = 0.5 + 0.5 * sin(phaseAngle + dot(advected, float2(0.85, -1.1)) * 0.9);
+                float3 baseColor = saturate(_BaseColor.rgb);
+                float3 accentColor = saturate(_AccentColor.rgb);
+                float3 deepColor = baseColor * 0.72 + accentColor * 0.08;
+                float3 poolColor = lerp(baseColor * 0.60, accentColor * 0.40, depth * 0.44 + interiorBlend * 0.10);
+                float3 innerColor = lerp(poolColor, accentColor, body * 0.60 + interiorBlend * 0.16);
+                float3 highlightColor = lerp(accentColor * 1.08, float3(0.88, 0.97, 1.0), 0.52);
 
-                float3 baseBlend = lerp(_BaseColor.rgb * 0.7, _AccentColor.rgb, body * (0.84 + radialFocus * 0.16));
-                float3 innerColor = lerp(baseBlend, _BaseColor.rgb * 0.48 + _AccentColor.rgb * 0.44, interiorBlend * 0.3 + radialFocus * 0.08);
-                float3 highlightColor = lerp(_AccentColor.rgb * 1.05, float3(0.88, 0.97, 1.0), 0.55);
-                float3 color = lerp(_BaseColor.rgb * 0.74, innerColor, depth);
-                color += highlightColor * highlight * (0.16 + phaseLift * 0.09 + radialFocus * 0.05);
-                color += flowMagnitude * (_AccentColor.rgb * 0.08);
-                color = lerp(color, _BaseColor.rgb * 0.74, smoothstep(0.82, 1.28, radius));
+                float3 color = lerp(deepColor, innerColor, body);
+                color = lerp(color, baseColor * 0.46 + accentColor * 0.34, depth * 0.24);
+                color += highlightColor * highlight * (0.12 + phaseLift * 0.08);
+                color += accentColor * filament * 0.07;
+                color += accentColor * flowMagnitude * 0.06;
+                color = lerp(color, deepColor, smoothstep(0.34, 0.90, shadowField * 0.5 + 0.5) * 0.18);
 
                 return half4(saturate(color), 1.0);
             }
