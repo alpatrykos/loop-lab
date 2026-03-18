@@ -33,6 +33,7 @@ namespace Precondition.LoopLab.Editor
             ExecuteStep("boundary validation", LoopBoundaryValidationBatch.RunAllPresets);
             ExecuteStep("editor window validation", LoopLabWindowBatchValidation.Run);
             ExecuteStep("landscape preset validation", LoopLabLandscapePresetValidator.Run);
+            ExecuteStep("fluid preset validation", LoopLabFluidPresetValidator.Run);
             ExecuteStep("GIF export validation", LoopLabGifExporterBatchValidation.Run);
             ExecuteStep("MP4 export validation", LoopLabMp4ExporterBatchValidation.Run);
             ExecuteStep("duration/FPS matrix validation", ValidateDurationFpsMatrix);
