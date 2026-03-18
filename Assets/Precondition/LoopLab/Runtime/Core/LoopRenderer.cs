@@ -91,8 +91,10 @@ namespace Precondition.LoopLab
             {
                 name = "LoopLab Preview",
                 antiAliasing = 1,
+                filterMode = FilterMode.Bilinear,
                 hideFlags = HideFlags.HideAndDontSave
             };
+            previewTexture.wrapMode = TextureWrapMode.Repeat;
             previewTexture.Create();
         }
 

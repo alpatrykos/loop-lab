@@ -104,14 +104,21 @@ Shader "LoopLab/Geometric"
 
             float FillMask(float signedDistance)
             {
-                float antiAlias = max(fwidth(signedDistance) * 1.5, 0.001);
+                float antiAlias = max(fwidth(signedDistance) * 2.0, 0.002);
                 return 1.0 - smoothstep(-antiAlias, antiAlias, signedDistance);
             }
 
             float StrokeMask(float signedDistance, float width)
             {
-                float antiAlias = max(fwidth(signedDistance) * 1.5, 0.001);
+                float antiAlias = max(fwidth(signedDistance) * 2.0, 0.002);
                 return 1.0 - smoothstep(width - antiAlias, width + antiAlias, abs(signedDistance));
+            }
+
+            float2 GetInclusiveUv(float2 uv)
+            {
+                float2 minimumResolution = float2(1.0, 1.0);
+                float2 resolution = max(_ScreenParams.xy, minimumResolution);
+                return saturate((uv * resolution - 0.5) / max(resolution - 1.0, minimumResolution));
             }
 
             half4 Frag(Varyings input) : SV_Target
@@ -119,15 +126,18 @@ Shader "LoopLab/Geometric"
                 const float fullTurn = 6.28318530718;
                 const float sqrt3 = 1.73205080757;
 
+                float2 uv = GetInclusiveUv(input.uv);
                 float theta = _Phase * fullTurn;
                 float columns = max(4.0, floor(_GridScale + 0.5));
                 float rows = max(3.0, floor(columns * 0.625 + 0.5));
                 float2 tileExtent = float2(columns, rows * sqrt3);
 
-                float2 domain = float2(input.uv.x * columns, input.uv.y * rows * sqrt3);
+                float2 domain = float2(uv.x * columns, uv.y * rows * sqrt3);
                 domain += float2(
                     _LoopVector.x * 0.18 + _LoopVector.y * 0.06,
                     _LoopVector.y * 0.14);
+                float2 periodicDomain = WrapPeriodic(domain, tileExtent);
+                float2 tileUv = periodicDomain / tileExtent;
 
                 float2 seedOffset = float2(_Seed * 0.0131, _Seed * 0.0177);
                 float2 cellCenter;
@@ -145,9 +155,11 @@ Shader "LoopLab/Geometric"
                 float2 outerDomain = Rotate2D(local + orbit * 0.32, theta * spinDirection * 0.42 + seedPhase * 0.35);
                 float2 innerDomain = Rotate2D(local - orbit * 0.18, -theta * spinDirection * 0.68 + seedPhase * 0.22);
 
-                float outerHex = SdHexagon(outerDomain / scalePulse, 0.40);
+                // Convert the scaled-domain SDF back to the unscaled domain so animated pulses do not
+                // make the edge thickness breathe from frame to frame.
+                float outerHex = SdHexagon(outerDomain / scalePulse, 0.40) * scalePulse;
                 float innerScale = 0.68 + 0.05 * cos(theta + seedPhase);
-                float innerHex = SdHexagon(innerDomain / innerScale, 0.15);
+                float innerHex = SdHexagon(innerDomain / innerScale, 0.15) * innerScale;
 
                 float outerFill = FillMask(outerHex);
                 float outerStroke = StrokeMask(outerHex, 0.026);
@@ -160,7 +172,7 @@ Shader "LoopLab/Geometric"
                 float radialPattern = 0.5 + 0.5 * cos(localRadius * 14.0 - theta * 1.4 + seedPhase * 1.6);
                 float detailBlend = saturate(spokePattern * 0.65 + radialPattern * 0.35);
 
-                float bandPattern = 0.5 + 0.5 * cos((input.uv.y * 1.5 - input.uv.x * 0.75) * fullTurn + theta * 0.6);
+                float bandPattern = 0.5 + 0.5 * cos((tileUv.y * 3.0 - tileUv.x * 2.0) * fullTurn + theta * 0.6);
 
                 float3 shadowColor = _BaseColor.rgb * 0.82;
                 float3 midColor = lerp(_BaseColor.rgb, _AccentColor.rgb, 0.24);

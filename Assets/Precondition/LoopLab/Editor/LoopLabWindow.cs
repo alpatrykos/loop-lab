@@ -600,9 +600,9 @@ namespace Precondition.LoopLab.Editor
 
         private static void DrawTiledPreview(Rect rect, Texture previewTexture)
         {
-            foreach (var tileRect in GetTiledPreviewTileRects(rect))
+            if (previewTexture != null)
             {
-                DrawPreviewTexture(tileRect, previewTexture);
+                GUI.DrawTextureWithTexCoords(rect, previewTexture, new Rect(0f, 0f, 2f, 2f), false);
             }
 
             DrawPreviewSeamGuides(rect);
